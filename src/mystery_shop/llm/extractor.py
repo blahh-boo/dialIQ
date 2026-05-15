@@ -230,5 +230,6 @@ def extract_call_facts(
         tool=_EXTRACTOR_TOOL,
         tool_name="extract_call_facts",
         max_tokens=2048,
+        temperature=0.0,
     )
     return _parse_extractor_response(response)

@@ -53,5 +53,6 @@ def classify_answered_by(transcript_text: str, *, client: ClaudeClient) -> Answe
         tool=_CLASSIFIER_TOOL,
         tool_name="classify_call",
         max_tokens=64,
+        temperature=0.0,
     )
     return _parse_classifier_response(response)

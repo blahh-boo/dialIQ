@@ -25,6 +25,7 @@ class ClaudeClient:
         system: str,
         messages: list[anthropic.types.MessageParam],
         max_tokens: int = 1024,
+        temperature: float = 1.0,
     ) -> anthropic.types.Message:
         """Send a plain completion request (no tools)."""
         return self._client.messages.create(
@@ -32,6 +33,7 @@ class ClaudeClient:
             system=self._cached_system(system),
             messages=messages,
             max_tokens=max_tokens,
+            temperature=temperature,
         )
 
     def complete_with_tool(
@@ -43,6 +45,7 @@ class ClaudeClient:
         tool: anthropic.types.ToolParam,
         tool_name: str,
         max_tokens: int = 1024,
+        temperature: float = 1.0,
     ) -> anthropic.types.Message:
         """Force the model to call *tool_name* using strict tool-choice."""
         return self._client.messages.create(
@@ -52,6 +55,7 @@ class ClaudeClient:
             tools=[tool],
             tool_choice=anthropic.types.ToolChoiceToolParam(type="tool", name=tool_name),
             max_tokens=max_tokens,
+            temperature=temperature,
         )
 
     @staticmethod

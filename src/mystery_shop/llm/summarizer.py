@@ -44,6 +44,7 @@ def generate_one_liner(
         system=system,
         messages=[{"role": "user", "content": user_content}],
         max_tokens=80,
+        temperature=0.0,
     )
 
     for block in response.content:
