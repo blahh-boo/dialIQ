@@ -243,6 +243,72 @@ def replay(transcript_path: str) -> None:
     typer.echo(f"SDR one-liner: {one_liner}")
 
 
+@app.command()
+def reset(
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the confirmation prompt"),
+) -> None:
+    """Wipe all call data (call_attempts → transcripts → extractions → scores).
+
+    Leaves the `leads` table untouched. Idempotent: running it twice is identical
+    to running it once. Used by `make seed` to guarantee a deterministic state.
+
+    Safety: refuses to run non-interactively (`--yes`) against a non-local
+    database, so an automated seed can never truncate a remote/prod DB.
+    """
+    from urllib.parse import urlparse
+
+    from sqlalchemy import func, text
+
+    from mystery_shop.config import get_settings
+    from mystery_shop.db.models import CallAttempt, Extraction, Score, Transcript
+    from mystery_shop.db.session import session_scope
+
+    settings = get_settings()
+
+    # Guard: never allow unattended truncation of a non-local database.
+    # Strip the SQLAlchemy "+driver" suffix so urlparse can read the host.
+    dsn = settings.database_url
+    scheme, _, rest = dsn.partition("://")
+    normalized = scheme.split("+", 1)[0] + "://" + rest
+    host = (urlparse(normalized).hostname or "").lower()
+    is_local = host in ("", "localhost", "127.0.0.1", "::1")
+    if not is_local and yes:
+        typer.echo(
+            f"Refusing: --yes against non-local DB host {host!r}. "
+            "Run without --yes to confirm interactively.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    with session_scope() as session:
+        counts = {
+            "call_attempts": session.query(func.count(CallAttempt.id)).scalar() or 0,
+            "transcripts": session.query(func.count(Transcript.id)).scalar() or 0,
+            "extractions": session.query(func.count(Extraction.id)).scalar() or 0,
+            "scores": session.query(func.count(Score.id)).scalar() or 0,
+        }
+
+    total = sum(counts.values())
+    if total == 0:
+        typer.echo("Nothing to reset — call data is already empty.")
+        return
+
+    summary = ", ".join(f"{n} {t}" for t, n in counts.items() if n)
+    if not yes:
+        typer.echo(f"This will permanently delete: {summary}.")
+        typer.echo(f"Leads are NOT affected. Database host: {host or 'local socket'}.")
+        if not typer.confirm("Proceed?"):
+            typer.echo("Aborted — nothing changed.")
+            raise typer.Exit(1)
+
+    # One transaction. session_scope commits on success, rolls back on any error —
+    # a failure mid-truncate leaves the DB exactly as it was.
+    with session_scope() as session:
+        session.execute(text("TRUNCATE TABLE call_attempts RESTART IDENTITY CASCADE"))
+
+    typer.echo(f"Reset complete — deleted {summary}. Leads preserved.")
+
+
 @app.command(name="export-ranked")
 def export_ranked(
     output: str = typer.Option("samples/ranked.csv", "--output", "-o"),

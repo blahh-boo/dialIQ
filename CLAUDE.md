@@ -208,21 +208,46 @@ Deduction table (v1):
 
 Package management is **uv** (PEP 735 dependency groups). Lint/format **ruff**, types **mypy --strict**, tests **pytest**. Pre-commit hooks run all three locally on every commit.
 
+### The easy path — four `make` targets
+
+This is the canonical way to run the system. Prefer it; only drop to raw CLI for debugging.
+
+```bash
+# one-time install + secrets
+brew install postgresql ngrok uv
+uv sync && npm --prefix frontend install
+cp .env.example .env                 # then put a real ANTHROPIC_API_KEY in .env
+uv run pre-commit install
+
+make setup     # check Postgres, create DB, migrate, doctor   (run once)
+make seed      # deterministic demo data — re-run-safe         (run anytime)
+make api       # backend  (terminal 1) → http://localhost:8000
+make ui        # frontend (terminal 2) → http://localhost:5173
+```
+
+`make help` lists every target. **`make seed` is re-run-safe by construction**
+(`ingest → reset → campaign`, so every run rebuilds the identical queue) and is
+guarded against the corrupting mistakes: it refuses `RUN_MODE=live` unless
+`ALLOW_LIVE=1`, holds a lockfile so two seeds can't interleave, gates on `doctor`
+and an applied schema before writing data, and `reset` refuses `--yes` against a
+non-local DB. Defensive logic lives in `scripts/setup.sh`, `scripts/seed.sh`, and
+the `reset` CLI command — the Makefile is a thin, inspectable wrapper.
+
+### Raw CLI (what the targets wrap — for debugging)
+
 ```bash
 # one-time
-brew install postgresql ngrok uv
 createdb mysteryshop
-uv sync                                                # installs runtime + dev
-cp .env.example .env                                   # then fill in keys
-uv run pre-commit install
 uv run alembic upgrade head
 
 # dev loop
-ngrok http --domain=<your-static-domain> 8000          # terminal 1
+ngrok http --domain=<your-static-domain> 8000          # terminal 1 (live mode only)
 uv run uvicorn mystery_shop.webhook.app:app --reload   # terminal 2
 uv run mystery-shop doctor                             # health check
-uv run mystery-shop ingest samples/leads.xlsx          # load leads
-uv run mystery-shop call --to +14155551234             # trigger one call
+uv run mystery-shop ingest "…Round 2.xlsx"             # load leads
+uv run mystery-shop reset                              # wipe call data (keeps leads)
+uv run mystery-shop campaign --limit 20                # fire calls
+uv run mystery-shop export-ranked                      # write samples/ranked.csv
 
 # quality gates
 uv run ruff check && uv run ruff format --check
@@ -232,13 +257,15 @@ uv run pytest
 
 ## CLI commands
 
-- `doctor` — verify env, DB, Vapi auth, Anthropic auth, ngrok reachable
+- `doctor` — verify env, DB, Anthropic auth, and (live mode) Vapi config
 - `ingest <xlsx>` — load + normalize lead list
-- `call --lead-id N` or `call --to +1...` — fire a single call
+- `campaign --limit N` — fire N calls respecting business hours + interleave
+- `reset [--yes]` — wipe call data (call_attempts → … → scores), keep leads; refuses `--yes` on a non-local DB
 - `score --call-attempt-id N` — re-score an existing call (rubric iteration)
-- `replay <transcript.json>` — run the extraction pipeline against a saved transcript
+- `replay <transcript.json>` — run the extraction pipeline against a saved transcript (no DB write)
 - `export-ranked` — write `ranked.csv` for SDR consumption
-- `campaign --limit N` — fire N calls respecting business hours + retries
+
+> The four `make` targets (`setup`, `seed`, `api`, `ui`) wrap these — see **Local setup commands**.
 
 ## Vapi configuration (in their dashboard, just information for your awarness)
 

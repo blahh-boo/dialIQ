@@ -33,26 +33,54 @@ Five tables: `leads`, `call_attempts`, `transcripts`, `extractions`, `scores`. F
 
 ## Quick start
 
+**Four commands. That's the whole thing.**
+
 ```bash
-# one-time
+# 0. one-time install + secrets (only the very first time)
 brew install postgresql ngrok uv
-createdb mysteryshop
-uv sync
-cp .env.example .env                   # add ANTHROPIC_API_KEY at minimum
-uv run alembic upgrade head
+uv sync && npm --prefix frontend install
+cp .env.example .env          # then put your real ANTHROPIC_API_KEY in .env
 
-# health check
-uv run mystery-shop doctor
+# 1. provision the machine — checks Postgres, creates the DB, migrates, health-checks
+make setup
 
-# load the leads xlsx (handles leading-zero zips, dedupes on phone, drops 40 no-phone rows)
-uv run mystery-shop ingest "Restaurant Phone Numbers - Maple Take Home Round 2.xlsx"
+# 2. load a deterministic demo dataset — safe to re-run
+make seed
 
-# fire 20 calls (RUN_MODE drives the voice provider — default is mock)
-uv run mystery-shop campaign --limit 20
-
-# write the SDR deliverable
-uv run mystery-shop export-ranked              # → samples/ranked.csv
+# 3. run the two servers (two terminals)
+make api          # terminal 1 — backend  → http://localhost:8000
+make ui           # terminal 2 — frontend → http://localhost:5173
 ```
+
+Open **http://localhost:5173** — the SDR cockpit, populated with real extracted data.
+
+Run `make help` anytime to see every target.
+
+### Why it's safe to re-run
+
+`make seed` is **deterministic by construction**: it runs `ingest → reset → campaign` in
+that order, so every run wipes prior call data and rebuilds the *identical* queue. You
+can never accidentally double your dataset, and a half-finished or interrupted seed
+fully recovers on the next `make seed`. Protections built into `make seed`:
+
+- **Refuses `RUN_MODE=live`** (would place real calls) unless you explicitly opt in with `ALLOW_LIVE=1`
+- **Lockfile** — two seeds can't run at once; interrupted seeds release the lock cleanly
+- **`doctor` gate** — bad env / DB / API key aborts *before* any data is written
+- **Schema check** — refuses to seed if migrations aren't applied (tells you to run `make setup`)
+- **`reset` refuses `--yes` against a non-local database** — an automated seed can never truncate a remote/prod DB
+
+### What each command does under the hood
+
+| `make` target | Equivalent manual commands |
+|---|---|
+| `make setup`  | `pg_isready` → `createdb mysteryshop` → `uv run alembic upgrade head` → `uv run mystery-shop doctor` |
+| `make seed`   | `ingest "…xlsx"` → `mystery-shop reset --yes` → `campaign --limit 20` → `export-ranked` |
+| `make api`    | `uv run uvicorn mystery_shop.webhook.app:app --reload` |
+| `make ui`     | `npm --prefix frontend run dev` |
+| `make reset`  | `uv run mystery-shop reset` (interactive confirm; wipes call data, keeps leads) |
+
+Every step is still individually runnable via the CLI — the Makefile is a thin,
+inspectable wrapper, not a black box.
 
 ## Run modes (env var `RUN_MODE`)
 
