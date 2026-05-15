@@ -232,11 +232,11 @@ def extract_call_facts(
         messages=[{"role": "user", "content": user_content}],
         tool=_EXTRACTOR_TOOL,
         tool_name="extract_call_facts",
-        max_tokens=3000,
+        max_tokens=2000,
         temperature=0.0,
     )
     logger.info(
-        f"Extractor output tokens: {response.usage.output_tokens} / 3000 "
-        f"({100 * response.usage.output_tokens / 3000:.1f}% of limit)"
+        f"Extractor output tokens: {response.usage.output_tokens} / 2000 "
+        f"({100 * response.usage.output_tokens / 2000:.1f}% of limit)"
     )
     return _parse_extractor_response(response)
