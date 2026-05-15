@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, cast
 
 import anthropic
+
+logger = logging.getLogger(__name__)
 
 from mystery_shop.llm.claude_client import ClaudeClient
 from mystery_shop.llm.schemas import (
@@ -229,7 +232,11 @@ def extract_call_facts(
         messages=[{"role": "user", "content": user_content}],
         tool=_EXTRACTOR_TOOL,
         tool_name="extract_call_facts",
-        max_tokens=2048,
+        max_tokens=3000,
         temperature=0.0,
+    )
+    logger.info(
+        f"Extractor output tokens: {response.usage.output_tokens} / 3000 "
+        f"({100 * response.usage.output_tokens / 3000:.1f}% of limit)"
     )
     return _parse_extractor_response(response)
