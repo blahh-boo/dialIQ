@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /Users/sohaihajri/Repos -type f -name \"package.json\" | head -20)",
+      "Read(//Users/sohaihajri/Repos/**)",
+      "Bash(command -v uv)",
+      "Bash(uv --version)"
+    ]
+  }
+}

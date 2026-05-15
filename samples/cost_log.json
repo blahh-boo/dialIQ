@@ -1,0 +1,35 @@
+{
+  "currency": "USD",
+  "model_pricing_per_million_tokens": {
+    "claude-sonnet-4-6": { "input": 3.0, "output": 15.0, "cache_read": 0.30 },
+    "claude-haiku-4-5":  { "input": 1.0, "output":  5.0, "cache_read": 0.10 }
+  },
+  "per_call_breakdown": {
+    "pre_call_inference":  { "model": "claude-sonnet-4-6", "tokens_in":  500, "tokens_out": 100, "uncached_usd": 0.0030, "cached_usd": 0.0017 },
+    "answered_by_classifier": { "model": "claude-haiku-4-5",  "tokens_in": 1000, "tokens_out":  30, "uncached_usd": 0.0012, "cached_usd": 0.0004 },
+    "callfacts_extractor": { "model": "claude-sonnet-4-6", "tokens_in": 2000, "tokens_out": 400, "uncached_usd": 0.0120, "cached_usd": 0.0066 },
+    "sdr_one_liner":       { "model": "claude-haiku-4-5",  "tokens_in":  600, "tokens_out":  50, "uncached_usd": 0.0009, "cached_usd": 0.0004 },
+    "in_call_agent":       { "provider": "vapi+anthropic", "notes": "Haiku 4.5 routing; ~150 model turns avg", "est_usd": 0.0500 },
+    "vapi_voice_stack":    { "provider": "vapi", "notes": "Deepgram STT + ElevenLabs TTS + telephony", "est_usd_per_2min_call": 0.3000 }
+  },
+  "per_call_totals_usd": {
+    "llm_pipeline_uncached": 0.0171,
+    "llm_pipeline_cached":   0.0091,
+    "voice_stack":           0.3500,
+    "total_uncached":        0.3671,
+    "total_cached":          0.3591
+  },
+  "sample_run_2026_05_14": {
+    "intended_calls": 20,
+    "actual_calls_placed": 0,
+    "actual_calls_extracted": 0,
+    "estimated_spend_usd": 7.20,
+    "actual_spend_usd": 0.00,
+    "notes": "Estimate only — fill actual_* fields after the live sample run. Budget ceiling: $20."
+  },
+  "full_2355_lead_projection_usd": {
+    "if_all_picked_up": 864.50,
+    "if_50pct_pickup":  450.00,
+    "comment": "Out of scope for this take-home. Documented for SDR ops planning."
+  }
+}

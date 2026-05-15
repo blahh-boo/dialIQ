@@ -1,0 +1,10 @@
+{
+  "call_id": "voicemail-001",
+  "ended_reason": "voicemail",
+  "transcript_text": "User: You've reached Golden Dragon Restaurant. We're unable to take your call right now. Please leave a message after the beep and we'll get back to you as soon as possible.\nAssistant: I've reached voicemail. I'll try again later. Goodbye.",
+  "messages": [
+    {"role": "user", "message": "You've reached Golden Dragon Restaurant. We're unable to take your call right now. Please leave a message after the beep and we'll get back to you as soon as possible.", "time": 10.2, "duration": 8.5},
+    {"role": "assistant", "message": "I've reached voicemail. I'll try again later. Goodbye.", "time": 19.5, "duration": 3.0}
+  ],
+  "duration_seconds": 24
+}

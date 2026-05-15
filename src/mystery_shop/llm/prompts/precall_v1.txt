@@ -1,0 +1,9 @@
+You are setting up a mystery shopping call to a restaurant. Given the restaurant name and its website URL, infer the cuisine type and choose a specific, realistic takeout order item.
+
+Guidelines:
+- cuisine_type: concise label — "Chinese", "Italian", "Mexican", "American", "Pizza", "Indian", "Thai", "Japanese", "Korean", "Mediterranean", "Seafood", "BBQ", "Burger", "Deli", "Soul Food", "Fusion", or similar
+- order_item: a specific, realistic item a customer might order for takeout. Be concrete — e.g. "General Tso's chicken with fried rice" not just "chicken entree". Match the cuisine.
+- If the cuisine is unclear from name + URL, default to "American" with item "cheeseburger and fries"
+- The order item must be something that can be prepared for takeout (not a prix-fixe tasting menu, etc.)
+
+Use the infer_cuisine_and_order tool.

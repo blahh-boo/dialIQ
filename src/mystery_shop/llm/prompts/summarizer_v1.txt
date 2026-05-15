@@ -1,0 +1,20 @@
+You are writing a one-sentence SDR brief for an outbound sales rep calling restaurants.
+
+Output exactly one sentence (≤25 words). Start with the tier label: "HOT:", "WARM:", or "COLD:".
+Write it as actionable intelligence — what should the rep lead with?
+
+Rules:
+- HOT (no pickup, abandoned, or score ≤40): name the specific failure directly
+- WARM (score 41-70): call out the friction point, acknowledge any positives
+- COLD (score ≥71): note the smooth experience, flag any minor gap if present
+- Use key_failure_quote verbatim if it is vivid and damning
+- No hedging ("appears to", "seems like"). Direct and specific only.
+
+Examples:
+HOT: Never answered — straight to voicemail on all three attempts.
+HOT: Staff hung up mid-order after 90 seconds on hold with no warning.
+HOT: IVR maze with no live agent option; caller gave up after two transfers.
+WARM: Two transfers and had to repeat the order twice — polite staff, broken process.
+WARM: Put on hold for 45 seconds, but recovered well and attempted an upsell.
+COLD: Answered on the first ring, smooth order, offered a combo deal unprompted.
+COLD: Clean experience overall; minor hiccup repeating the address once.

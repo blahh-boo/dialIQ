@@ -1,0 +1,122 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mystery-shop"
+version = "0.1.0"
+description = "Mystery shopping system for restaurants — automated phone-call extraction and lead scoring via Vapi + Anthropic."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+dependencies = [
+    "alembic==1.18.4",
+    "anthropic==0.102.0",
+    "fastapi>=0.115,<0.116",
+    "openpyxl>=3.1,<4",
+    "pandas>=2.2,<3",
+    "pgeocode==0.5.0",
+    "phonenumbers>=8.13,<9",
+    "psycopg[binary]>=3.2,<4",
+    "pydantic>=2.8,<3",
+    "pydantic-settings>=2.5,<3",
+    "python-dotenv>=1.0,<2",
+    "sqlalchemy==2.0.49",
+    "timezonefinder==8.2.4",
+    "typer>=0.12,<1",
+    "uvicorn[standard]>=0.30,<1",
+    "vapi_server_sdk==1.9.0",
+]
+
+[project.scripts]
+mystery-shop = "mystery_shop.cli:app"
+
+[dependency-groups]
+dev = [
+    "httpx>=0.27,<1",
+    "ipykernel>=7.2.0",
+    "jupyter>=1.1.1",
+    "mypy>=1.11,<2",
+    "pandas-stubs>=2.2,<3",
+    "pre-commit>=3.8,<4",
+    "pytest>=8.3,<9",
+    "pytest-asyncio>=0.24,<1",
+    "pytest-cov>=5,<6",
+    "ruff>=0.6,<1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mystery_shop"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "W",
+    "F",
+    "I",
+    "B",
+    "C4",
+    "UP",
+    "RUF",
+    "SIM",
+    "TID",
+    "PT",
+    "RET",
+    "ARG",
+    "PTH",
+    "ERA",
+    "N",
+    "S",
+]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "ARG"]
+"migrations/**" = ["ERA"]
+# Protocol implementors that intentionally ignore call parameters
+"src/mystery_shop/voice/mock_provider.py" = ["ARG002"]
+"src/mystery_shop/voice/replay_provider.py" = ["ARG002"]
+"src/mystery_shop/voice/vapi_provider.py" = ["ARG002"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unreachable = true
+explicit_package_bases = true
+namespace_packages = true
+mypy_path = ["src"]
+
+[[tool.mypy.overrides]]
+module = ["pgeocode", "timezonefinder", "vapi.*", "vapi_server_sdk.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = ["-ra", "--strict-markers", "--strict-config"]
+markers = [
+    "live: tests requiring live external services (Vapi, Anthropic, Postgres)",
+    "integration: tests requiring a real database",
+]
+
+[tool.coverage.run]
+source = ["src/mystery_shop"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+]

@@ -1,0 +1,17 @@
+{
+  "call_id": "good-pickup-001",
+  "ended_reason": "assistant-ended-call",
+  "transcript_text": "Assistant: Hi, I'm calling to place a takeout order.\nUser: Golden Dragon, how can I help you?\nAssistant: I'd like to order the General Tso's chicken with fried rice please.\nUser: Sure! Would you like to add egg rolls or a drink with that?\nAssistant: No thank you, just the entree.\nUser: Got it. Your total will be $14.95. Ready in about 20 minutes. Name for the order?\nAssistant: Just put it under Alex.\nUser: Great, we'll see you in 20, Alex!\nAssistant: Perfect, thank you so much!",
+  "messages": [
+    {"role": "assistant", "message": "Hi, I'm calling to place a takeout order.", "time": 2.1, "duration": 2.5},
+    {"role": "user", "message": "Golden Dragon, how can I help you?", "time": 5.0, "duration": 2.0},
+    {"role": "assistant", "message": "I'd like to order the General Tso's chicken with fried rice please.", "time": 7.3, "duration": 3.2},
+    {"role": "user", "message": "Sure! Would you like to add egg rolls or a drink with that?", "time": 11.0, "duration": 3.1},
+    {"role": "assistant", "message": "No thank you, just the entree.", "time": 14.5, "duration": 2.0},
+    {"role": "user", "message": "Got it. Your total will be $14.95. Ready in about 20 minutes. Name for the order?", "time": 17.0, "duration": 4.2},
+    {"role": "assistant", "message": "Just put it under Alex.", "time": 21.5, "duration": 1.8},
+    {"role": "user", "message": "Great, we'll see you in 20, Alex!", "time": 23.5, "duration": 2.1},
+    {"role": "assistant", "message": "Perfect, thank you so much!", "time": 26.0, "duration": 1.5}
+  ],
+  "duration_seconds": 30
+}

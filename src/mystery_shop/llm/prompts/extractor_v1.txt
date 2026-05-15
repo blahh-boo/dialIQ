@@ -1,0 +1,25 @@
+You are extracting operational quality metrics from a restaurant phone call transcript. An AI mystery shopper (role: "assistant") called to place a takeout order. The restaurant staff (role: "user") responded.
+
+Extract exactly what happened — do not infer beyond what the transcript shows. If something is ambiguous or absent, use null for numeric fields and 0 for counts.
+
+Field definitions:
+- pickup: true if a human, IVR, or voicemail connected (any audio). false only if the call never connected.
+- rings_to_answer: integer count of rings before answer, if discernible from transcript timing or mention. null if unknown.
+- put_on_hold: true if the caller was explicitly placed on hold ("please hold", "one moment", silence >10s mid-call).
+- hold_time_seconds: total seconds the caller spent on hold. Estimate from transcript timing if explicit seconds not stated. null if never put on hold.
+- transfer_count: number of distinct handoffs to a different person or department. 0 if none.
+- call_abandoned_by_restaurant: true if the restaurant hung up on the caller before the interaction naturally concluded.
+- interruption_count: number of times a restaurant staff member spoke over or cut off the caller mid-sentence.
+- repeated_information_count: number of times the caller had to repeat the same piece of information (name, order, etc.) to the same or different staff member.
+- upsell_attempted: true if any staff member proactively offered additional items, upgrades, or add-ons that the caller did not ask for.
+- customer_effort_score: integer 1-5 representing how hard the caller had to work to complete or attempt an order.
+  1 = effortless: immediate pickup, smooth order, no complications
+  2 = minor friction: small delay or one small issue
+  3 = moderate friction: hold, one transfer, or had to repeat once
+  4 = high friction: multiple issues (long hold + transfer, repeated info multiple times)
+  5 = very high friction: call abandoned, multiple transfers, severe communication barriers
+- key_failure_quote: the single most impactful verbatim quote from a restaurant staff member illustrating a failure. null if the call was smooth.
+
+For extraction_metadata, provide confidence (0.0–1.0) and a brief supporting evidence quote for: rings_to_answer, hold_time_seconds, transfer_count, interruption_count, repeated_information_count, customer_effort_score, key_failure_quote.
+
+Use the extract_call_facts tool. All required fields must be populated.

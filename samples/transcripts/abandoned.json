@@ -1,0 +1,12 @@
+{
+  "call_id": "abandoned-001",
+  "ended_reason": "customer-ended-call",
+  "transcript_text": "User: Yeah?\nAssistant: Hi, I was hoping to place a takeout order—\nUser: We're busy.\nAssistant: I understand, I just need a minute to—",
+  "messages": [
+    {"role": "user", "message": "Yeah?", "time": 4.2, "duration": 0.5},
+    {"role": "assistant", "message": "Hi, I was hoping to place a takeout order—", "time": 5.0, "duration": 2.8},
+    {"role": "user", "message": "We're busy.", "time": 8.2, "duration": 0.8},
+    {"role": "assistant", "message": "I understand, I just need a minute to—", "time": 9.5, "duration": 2.5}
+  ],
+  "duration_seconds": 12
+}

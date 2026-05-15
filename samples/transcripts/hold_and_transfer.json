@@ -1,0 +1,22 @@
+{
+  "call_id": "hold-transfer-001",
+  "ended_reason": "assistant-ended-call",
+  "transcript_text": "User: Hold please.\nAssistant: Sure, I'll hold.\nUser: Thank you for holding, this is Maria, how can I help you?\nAssistant: Hi, I'd like to place a takeout order for the pad thai please.\nUser: I'm actually going to need to transfer you to our order desk, one moment.\nAssistant: Oh, okay.\nUser: Order desk, this is James.\nAssistant: Hi James, I'd like to place a takeout order for pad thai.\nUser: Pad thai? We don't have pad thai on our menu.\nAssistant: Oh I'm sorry, can I get the noodle dish then, the lo mein?\nUser: Sure, lo mein. Anything else?\nAssistant: That's all, thank you.\nUser: Okay, about 25 minutes. Number?\nAssistant: I'll just come pick it up, thanks.",
+  "messages": [
+    {"role": "user", "message": "Hold please.", "time": 3.5, "duration": 1.2},
+    {"role": "assistant", "message": "Sure, I'll hold.", "time": 5.0, "duration": 1.5},
+    {"role": "user", "message": "Thank you for holding, this is Maria, how can I help you?", "time": 95.8, "duration": 3.5},
+    {"role": "assistant", "message": "Hi, I'd like to place a takeout order for the pad thai please.", "time": 99.5, "duration": 3.8},
+    {"role": "user", "message": "I'm actually going to need to transfer you to our order desk, one moment.", "time": 103.8, "duration": 3.9},
+    {"role": "assistant", "message": "Oh, okay.", "time": 108.2, "duration": 1.0},
+    {"role": "user", "message": "Order desk, this is James.", "time": 115.0, "duration": 2.0},
+    {"role": "assistant", "message": "Hi James, I'd like to place a takeout order for pad thai.", "time": 117.5, "duration": 3.5},
+    {"role": "user", "message": "Pad thai? We don't have pad thai on our menu.", "time": 121.5, "duration": 3.0},
+    {"role": "assistant", "message": "Oh I'm sorry, can I get the noodle dish then, the lo mein?", "time": 125.0, "duration": 3.8},
+    {"role": "user", "message": "Sure, lo mein. Anything else?", "time": 129.2, "duration": 2.0},
+    {"role": "assistant", "message": "That's all, thank you.", "time": 131.5, "duration": 1.5},
+    {"role": "user", "message": "Okay, about 25 minutes. Number?", "time": 133.5, "duration": 2.0},
+    {"role": "assistant", "message": "I'll just come pick it up, thanks.", "time": 136.0, "duration": 2.2}
+  ],
+  "duration_seconds": 140
+}

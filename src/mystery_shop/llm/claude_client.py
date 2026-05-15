@@ -1,0 +1,65 @@
+"""Thin wrapper around the Anthropic SDK with prompt caching on system prompts."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import anthropic
+
+_PROMPTS_DIR = Path(__file__).parent / "prompts"
+
+
+class ClaudeClient:
+    def __init__(self, api_key: str) -> None:
+        self._client = anthropic.Anthropic(api_key=api_key)
+
+    @staticmethod
+    def load_prompt(filename: str) -> str:
+        """Read a versioned prompt file from the prompts directory."""
+        return (_PROMPTS_DIR / filename).read_text(encoding="utf-8").strip()
+
+    def complete(
+        self,
+        *,
+        model: str,
+        system: str,
+        messages: list[anthropic.types.MessageParam],
+        max_tokens: int = 1024,
+    ) -> anthropic.types.Message:
+        """Send a plain completion request (no tools)."""
+        return self._client.messages.create(
+            model=model,
+            system=self._cached_system(system),
+            messages=messages,
+            max_tokens=max_tokens,
+        )
+
+    def complete_with_tool(
+        self,
+        *,
+        model: str,
+        system: str,
+        messages: list[anthropic.types.MessageParam],
+        tool: anthropic.types.ToolParam,
+        tool_name: str,
+        max_tokens: int = 1024,
+    ) -> anthropic.types.Message:
+        """Force the model to call *tool_name* using strict tool-choice."""
+        return self._client.messages.create(
+            model=model,
+            system=self._cached_system(system),
+            messages=messages,
+            tools=[tool],
+            tool_choice=anthropic.types.ToolChoiceToolParam(type="tool", name=tool_name),
+            max_tokens=max_tokens,
+        )
+
+    @staticmethod
+    def _cached_system(text: str) -> list[anthropic.types.TextBlockParam]:
+        return [
+            anthropic.types.TextBlockParam(
+                type="text",
+                text=text,
+                cache_control=anthropic.types.CacheControlEphemeralParam(type="ephemeral"),
+            )
+        ]
