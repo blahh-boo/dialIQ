@@ -11,9 +11,11 @@ import logging
 from typing import Any
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
+from mystery_shop.api.routes import router as api_router
 from mystery_shop.config import get_settings
 from mystery_shop.db.session import session_scope
 from mystery_shop.llm.claude_client import ClaudeClient
@@ -23,6 +25,15 @@ from mystery_shop.webhook.vapi_models import VapiEndOfCallReport
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Mystery Shop Webhook", docs_url=None, redoc_url=None)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
+
+app.include_router(api_router)
 
 
 def _verify_secret(request: Request) -> None:
