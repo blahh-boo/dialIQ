@@ -1,17 +1,28 @@
-"""Phone E.164 normalization and timezone inference for xlsx lead rows."""
+"""Lead ingest: read the xlsx, normalize each row (phone E.164, zip, timezone,
+state, name-from-URL), and upsert into the `leads` table.
+
+`normalize_row` is the pure transform; `load_xlsx` is the DB-facing loader.
+"""
 
 from __future__ import annotations
 
 import logging
 import math
 import re
-from typing import Any
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, cast
 from urllib.parse import urlparse
 
+import pandas as pd
 import pgeocode
 import phonenumbers
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.orm import Session
 from timezonefinder import TimezoneFinder
+
+from maple.db import Lead
 
 logger = logging.getLogger(__name__)
 
@@ -79,20 +90,56 @@ _STATE_TZ: dict[str, str] = {
 # Full US state name (lowercase) → 2-letter USPS code. The `leads.state` column
 # is varchar(2); source files vary between "Virginia" and "VA", so normalize.
 _STATE_ABBR: dict[str, str] = {
-    "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR",
-    "california": "CA", "colorado": "CO", "connecticut": "CT", "delaware": "DE",
-    "florida": "FL", "georgia": "GA", "hawaii": "HI", "idaho": "ID",
-    "illinois": "IL", "indiana": "IN", "iowa": "IA", "kansas": "KS",
-    "kentucky": "KY", "louisiana": "LA", "maine": "ME", "maryland": "MD",
-    "massachusetts": "MA", "michigan": "MI", "minnesota": "MN",
-    "mississippi": "MS", "missouri": "MO", "montana": "MT", "nebraska": "NE",
-    "nevada": "NV", "new hampshire": "NH", "new jersey": "NJ",
-    "new mexico": "NM", "new york": "NY", "north carolina": "NC",
-    "north dakota": "ND", "ohio": "OH", "oklahoma": "OK", "oregon": "OR",
-    "pennsylvania": "PA", "rhode island": "RI", "south carolina": "SC",
-    "south dakota": "SD", "tennessee": "TN", "texas": "TX", "utah": "UT",
-    "vermont": "VT", "virginia": "VA", "washington": "WA",
-    "west virginia": "WV", "wisconsin": "WI", "wyoming": "WY",
+    "alabama": "AL",
+    "alaska": "AK",
+    "arizona": "AZ",
+    "arkansas": "AR",
+    "california": "CA",
+    "colorado": "CO",
+    "connecticut": "CT",
+    "delaware": "DE",
+    "florida": "FL",
+    "georgia": "GA",
+    "hawaii": "HI",
+    "idaho": "ID",
+    "illinois": "IL",
+    "indiana": "IN",
+    "iowa": "IA",
+    "kansas": "KS",
+    "kentucky": "KY",
+    "louisiana": "LA",
+    "maine": "ME",
+    "maryland": "MD",
+    "massachusetts": "MA",
+    "michigan": "MI",
+    "minnesota": "MN",
+    "mississippi": "MS",
+    "missouri": "MO",
+    "montana": "MT",
+    "nebraska": "NE",
+    "nevada": "NV",
+    "new hampshire": "NH",
+    "new jersey": "NJ",
+    "new mexico": "NM",
+    "new york": "NY",
+    "north carolina": "NC",
+    "north dakota": "ND",
+    "ohio": "OH",
+    "oklahoma": "OK",
+    "oregon": "OR",
+    "pennsylvania": "PA",
+    "rhode island": "RI",
+    "south carolina": "SC",
+    "south dakota": "SD",
+    "tennessee": "TN",
+    "texas": "TX",
+    "utah": "UT",
+    "vermont": "VT",
+    "virginia": "VA",
+    "washington": "WA",
+    "west virginia": "WV",
+    "wisconsin": "WI",
+    "wyoming": "WY",
     "district of columbia": "DC",
 }
 
@@ -261,3 +308,95 @@ def normalize_row(row: dict[str, Any], *, source_row_index: int) -> LeadIngest:
         source_row_index=source_row_index,
         raw_metadata=raw_metadata,
     )
+
+
+_REQUIRED_COLUMNS = {"Location Phone"}
+_DROP_COLUMNS = {"Unnamed: 3"}
+
+
+@dataclass(frozen=True)
+class IngestResult:
+    inserted: int
+    skipped_no_phone: int
+    skipped_duplicate: int
+    error_count: int
+
+    @property
+    def total_processed(self) -> int:
+        return self.inserted + self.skipped_no_phone + self.skipped_duplicate + self.error_count
+
+
+def load_xlsx(path: Path, session: Session) -> IngestResult:
+    """Read leads from *path*, normalize, and upsert into `leads`.
+
+    Duplicate phones (same phone already in DB, or repeated in the file) are
+    silently skipped — `phone_e164` has a unique constraint.
+    Rows missing a parseable phone are logged and counted separately.
+    """
+    df = _read_and_clean(path)
+
+    inserted = skipped_no_phone = skipped_duplicate = error_count = 0
+
+    rows = cast(list[dict[str, Any]], df.to_dict("records"))
+    for idx, row in enumerate(rows):
+        try:
+            lead = normalize_row(row, source_row_index=idx)
+        except PhoneParseError as exc:
+            logger.debug("Row %d skipped — %s", idx, exc)
+            skipped_no_phone += 1
+            continue
+        except Exception as exc:
+            logger.warning("Row %d error — %s", idx, exc)
+            error_count += 1
+            continue
+
+        result = session.execute(
+            pg_insert(Lead)
+            .values(**_lead_values(lead))
+            .on_conflict_do_nothing(constraint="uq_leads_phone_e164")
+            .returning(Lead.id)
+        )
+        if result.scalar_one_or_none() is not None:
+            inserted += 1
+        else:
+            skipped_duplicate += 1
+
+    logger.info(
+        "Ingest complete — inserted=%d duplicates=%d no_phone=%d errors=%d",
+        inserted,
+        skipped_duplicate,
+        skipped_no_phone,
+        error_count,
+    )
+    return IngestResult(
+        inserted=inserted,
+        skipped_no_phone=skipped_no_phone,
+        skipped_duplicate=skipped_duplicate,
+        error_count=error_count,
+    )
+
+
+def _read_and_clean(path: Path) -> pd.DataFrame:
+    df: pd.DataFrame = pd.read_excel(path)
+
+    missing = _REQUIRED_COLUMNS - set(df.columns)
+    if missing:
+        raise ValueError(f"xlsx is missing required columns: {missing}")
+
+    return df.drop(columns=[c for c in _DROP_COLUMNS if c in df.columns])
+
+
+def _lead_values(lead: LeadIngest) -> dict[str, Any]:
+    return {
+        "restaurant_name": lead.restaurant_name,
+        "phone_e164": lead.phone_e164,
+        "website": lead.website,
+        "address": lead.address,
+        "city": lead.city,
+        "state": lead.state,
+        "postal_code": lead.postal_code,
+        "timezone": lead.timezone,
+        "google_reviews_count": lead.google_reviews_count,
+        "source_row_index": lead.source_row_index,
+        "raw_metadata": lead.raw_metadata,
+    }

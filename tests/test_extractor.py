@@ -5,13 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-
-from mystery_shop.llm.extractor import (
+from maple.llm.extractor import (
     EXTRACTOR_PROMPT_VERSION,
     _no_pickup_facts,
     _parse_tool_input,
 )
-from mystery_shop.llm.schemas import AnsweredBy, CallFacts
+from maple.llm.schemas import AnsweredBy, CallFacts
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -168,14 +167,14 @@ def test_no_pickup_facts_metadata_zero_confidence() -> None:
 def test_extractor_prompt_version_file_exists() -> None:
     from pathlib import Path
 
-    prompts_dir = Path(__file__).parent.parent / "src" / "mystery_shop" / "llm" / "prompts"
+    prompts_dir = Path(__file__).parent.parent / "maple" / "llm" / "prompts"
     assert (prompts_dir / EXTRACTOR_PROMPT_VERSION).exists()
 
 
 def test_classifier_prompt_version_file_exists() -> None:
     from pathlib import Path
 
-    from mystery_shop.llm.classifier import CLASSIFIER_PROMPT_VERSION
+    from maple.llm.passes import CLASSIFIER_PROMPT_VERSION
 
-    prompts_dir = Path(__file__).parent.parent / "src" / "mystery_shop" / "llm" / "prompts"
+    prompts_dir = Path(__file__).parent.parent / "maple" / "llm" / "prompts"
     assert (prompts_dir / CLASSIFIER_PROMPT_VERSION).exists()

@@ -7,16 +7,16 @@ from typing import Any, cast
 
 import anthropic
 
-logger = logging.getLogger(__name__)
-
-from mystery_shop.llm.claude_client import ClaudeClient
-from mystery_shop.llm.schemas import (
+from maple.llm.client import ClaudeClient
+from maple.llm.schemas import (
     AnsweredBy,
     CallFacts,
     ExtractionMetadata,
     FieldEvidence,
 )
-from mystery_shop.voice.base import EndOfCallReport
+from maple.voice import EndOfCallReport
+
+logger = logging.getLogger(__name__)
 
 EXTRACTOR_MODEL = "claude-sonnet-4-6"
 EXTRACTOR_PROMPT_VERSION = "extractor_v1.txt"

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from mystery_shop.llm.schemas import (
+from maple.llm.schemas import (
     CallFacts,
     ExtractionMetadata,
     FieldEvidence,

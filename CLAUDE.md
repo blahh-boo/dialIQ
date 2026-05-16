@@ -81,53 +81,40 @@ RUN_MODE=mock      # Canned fixtures → no network. For unit tests / CI.
 ## Repo structure
 
 ```
-mystery_shop/
-├── CLAUDE.md                       # this file
-├── README.md                       # for the reviewer
+Maple/
+├── CLAUDE.md                   # this file
+├── README.md                   # for the reviewer (incl. Operations section)
 ├── .env.example
-├── alembic.ini
-├── migrations/                     # alembic
+├── Makefile                    # setup / seed / api / ui / reset
+├── scripts/                    # setup.sh, seed.sh (guarded provisioning/seeding)
 ├── pyproject.toml
-├── samples/                        # real call outputs
-│   ├── transcripts/
-│   ├── extractions/
-│   ├── sdr_one_liners/
+├── data.xlsx                   # the lead list
+├── frontend/                   # Vite + React + TS SDR cockpit
+├── samples/
+│   ├── transcripts/            # canned fixtures (mock/replay + tests)
 │   ├── ranked.csv
 │   └── cost_log.json
-└── src/mystery_shop/
+└── maple/                      # the package (no src/ wrapper, no Alembic)
     ├── __init__.py
-    ├── cli.py                      # python -m mystery_shop {call,ingest,score,doctor}
-    ├── config.py                   # env vars, run mode
-    ├── db/
-    │   ├── models.py               # SQLAlchemy models
-    │   └── session.py
-    ├── ingest/
-    │   ├── xlsx_loader.py          # pandas → leads table
-    │   └── normalize.py            # phone E.164, tz inference
-    ├── voice/
-    │   ├── base.py                 # VoiceProvider Protocol
-    │   ├── vapi_provider.py        # real Vapi
-    │   ├── replay_provider.py      # transcripts from disk
-    │   └── mock_provider.py        # canned
+    ├── cli.py                  # typer: doctor, init-db, ingest, campaign, score, replay, reset, export-ranked
+    ├── config.py               # env vars, run mode
+    ├── db.py                   # 5 SQLAlchemy models + session_scope() + init_db()
+    ├── ingest.py               # phone E.164, zip, tz + state norm, xlsx → leads
+    ├── voice.py                # VoiceProvider Protocol + mock / replay / live Vapi
+    ├── scoring.py              # score_call(facts) → ScoreResult + tier thresholds
+    ├── scheduling.py           # business hours + interleave + campaign loop
+    ├── export.py               # ranked.csv deliverable
     ├── llm/
-    │   ├── claude_client.py        # thin Anthropic SDK wrapper
-    │   ├── precall.py              # cuisine_type + order_item gen
-    │   ├── classifier.py           # Haiku answered_by pass
-    │   ├── extractor.py            # Sonnet 15-field tool-use
-    │   ├── summarizer.py           # Haiku one-liner
-    │   ├── prompts/                # versioned .txt files
-    │   └── schemas.py              # Pydantic CallFacts, etc.
-    ├── scoring/
-    │   ├── rubric.py               # score_call(facts) → ScoreResult
-    │   └── tiers.py                # HOT/WARM/COLD thresholds
-    ├── scheduling/
-    │   ├── business_hours.py       # 11-2pm local, retry windows
-    │   ├── interleave.py           # don't-call-twice-in-a-row
-    │   └── worker.py               # picks eligible leads, fires calls
-    ├── webhook/
-    │   └── app.py                  # FastAPI; one route: POST /vapi/webhook
-    └── export/
-        └── ranked_csv.py           # final deliverable
+    │   ├── client.py           # thin Anthropic SDK wrapper (prompt caching)
+    │   ├── schemas.py          # Pydantic CallFacts, ScoreResult, etc.
+    │   ├── extractor.py        # Sonnet 10-field strict tool-use (the heavy pass)
+    │   ├── passes.py           # precall + Haiku classifier + Haiku one-liner
+    │   └── prompts/            # versioned .txt files
+    └── web/
+        ├── app.py              # FastAPI: POST /vapi/webhook, GET /health, mounts /api
+        ├── routes.py           # /api/* cockpit endpoints
+        ├── pipeline.py         # webhook-path extraction pipeline
+        └── models.py           # Vapi payloads + cockpit API response schemas
 ```
 
 ## Database schema (5 tables)
@@ -138,11 +125,11 @@ mystery_shop/
 - `extractions` — fields_jsonb (the 15 CallFacts) + model_used + prompt_version
 - `scores` — pickup, numeric_score, tier, summary_one_liner
 
-Full DDL in `migrations/versions/0001_initial.py`.
+Models + schema bootstrap in `maple/db.py` (`init_db()` — no Alembic).
 
 ## The CallFacts schema (extraction output)
 
-Defined as a Pydantic model in `src/mystery_shop/llm/schemas.py`. Non-boolean fields carry paired confidence + evidence in nested `ExtractionMetadata`. Strict tool use guarantees schema-valid output.
+Defined as a Pydantic model in `maple/llm/schemas.py`. Non-boolean fields carry paired confidence + evidence in nested `ExtractionMetadata`. Strict tool use guarantees schema-valid output.
 
 **Scored fields** (fed directly into `rubric.py`):
 1. `pickup: bool` — load-bearing; always HOT if False
@@ -161,7 +148,7 @@ Defined as a Pydantic model in `src/mystery_shop/llm/schemas.py`. Non-boolean fi
 
 ## Scoring rubric (deterministic Python)
 
-Pure function. Same `CallFacts` always produces the same `ScoreResult`. Rubric in `src/mystery_shop/scoring/rubric.py`. Score starts at 100, deductions subtracted, floored at 0. Bump `RUBRIC_VERSION` on any weight change.
+Pure function. Same `CallFacts` always produces the same `ScoreResult`. Rubric in `maple/scoring.py`. Score starts at 100, deductions subtracted, floored at 0. Bump `RUBRIC_VERSION` on any weight change.
 
 Tier thresholds:
 - **HOT:** `pickup == False` OR `call_abandoned_by_restaurant == True` OR `score ≤ 40`
@@ -196,7 +183,7 @@ Deduction table (v1):
 
 ## Conventions
 
-- **Prompts live in `src/mystery_shop/llm/prompts/`** as versioned files (e.g., `extractor_v3.txt`). Never inline prompt strings in Python. Store the filename in `extractions.prompt_version` for auditability.
+- **Prompts live in `maple/llm/prompts/`** as versioned files (e.g., `extractor_v3.txt`). Never inline prompt strings in Python. Store the filename in `extractions.prompt_version` for auditability.
 - **All LLM calls use prompt caching** (`cache_control: {"type": "ephemeral"}`) on the system prompt. ~85% cost reduction at scale.
 - **Pydantic models everywhere.** No raw dicts crossing module boundaries.
 - **All times stored as `TIMESTAMPTZ` UTC.** Convert to local only at display.
@@ -238,13 +225,13 @@ the `reset` CLI command — the Makefile is a thin, inspectable wrapper.
 ```bash
 # one-time
 createdb mysteryshop
-uv run alembic upgrade head
+uv run mystery-shop init-db                            # create schema from models
 
 # dev loop
 ngrok http --domain=<your-static-domain> 8000          # terminal 1 (live mode only)
-uv run uvicorn mystery_shop.webhook.app:app --reload   # terminal 2
+uv run uvicorn maple.web.app:app --reload              # terminal 2
 uv run mystery-shop doctor                             # health check
-uv run mystery-shop ingest "…Round 2.xlsx"             # load leads
+uv run mystery-shop ingest data.xlsx                   # load leads
 uv run mystery-shop reset                              # wipe call data (keeps leads)
 uv run mystery-shop campaign --limit 20                # fire calls
 uv run mystery-shop export-ranked                      # write samples/ranked.csv
@@ -288,7 +275,7 @@ System prompt uses Liquid variables: `{{shopper_name}}`, `{{restaurant_name}}`, 
 ## Build order (do this in this order)
 
 1. **Repo scaffold + pyproject.toml + .env.example**
-2. **DB models + first Alembic migration** — get `alembic upgrade head` clean
+2. **DB models + `init_db()`** — get `mystery-shop init-db` building the schema clean
 3. **xlsx ingest** — load 2,355 leads, normalize phones, infer timezones
 4. **Pydantic schemas** — `CallFacts`, `ScoreResult`, `ExtractionMetadata`
 5. **Scoring rubric** — pure function + unit tests (no LLM, can run in CI)

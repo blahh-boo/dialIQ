@@ -6,10 +6,10 @@ import logging
 
 from sqlalchemy.orm import Session
 
-from mystery_shop.db.models import (
+from maple.db import (
     AnsweredBy as DBAnsweredBy,
 )
-from mystery_shop.db.models import (
+from maple.db import (
     CallAttempt,
     CallStatus,
     Extraction,
@@ -17,18 +17,17 @@ from mystery_shop.db.models import (
     Score,
     Transcript,
 )
-from mystery_shop.llm.classifier import classify_answered_by
-from mystery_shop.llm.claude_client import ClaudeClient
-from mystery_shop.llm.extractor import (
+from maple.llm.client import ClaudeClient
+from maple.llm.extractor import (
     EXTRACTOR_MODEL,
     EXTRACTOR_PROMPT_VERSION,
     extract_call_facts,
 )
-from mystery_shop.llm.schemas import AnsweredBy
-from mystery_shop.llm.summarizer import generate_one_liner
-from mystery_shop.scoring.rubric import RUBRIC_VERSION, score_call
-from mystery_shop.voice.base import EndOfCallReport, TranscriptMessage
-from mystery_shop.webhook.vapi_models import VapiEndOfCallReport
+from maple.llm.passes import classify_answered_by, generate_one_liner
+from maple.llm.schemas import AnsweredBy
+from maple.scoring import RUBRIC_VERSION, score_call
+from maple.voice import EndOfCallReport, TranscriptMessage
+from maple.web.models import VapiEndOfCallReport
 
 logger = logging.getLogger(__name__)
 

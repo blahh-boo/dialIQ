@@ -64,12 +64,12 @@ say "Health check (doctor)"
 uv run mystery-shop doctor
 ok "doctor passed"
 
-# ── Guard 3: schema must be migrated ────────────────────────────────────────
-say "Verifying schema is at head"
-if ! uv run alembic current 2>/dev/null | grep -q '(head)'; then
-  die "Database is not migrated to head. Run:  make setup"
+# ── Guard 3: schema must exist ──────────────────────────────────────────────
+say "Verifying schema exists"
+if ! uv run python -c "import sys; from sqlalchemy import inspect; from maple.db import get_engine; sys.exit(0 if 'leads' in inspect(get_engine()).get_table_names() else 1)" 2>/dev/null; then
+  die "Schema not found (no 'leads' table). Run:  make setup"
 fi
-ok "Schema at head"
+ok "Schema present"
 
 # ── Guard 4: lead file must exist ───────────────────────────────────────────
 say "Checking lead file"

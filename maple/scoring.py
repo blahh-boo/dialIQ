@@ -1,17 +1,44 @@
-"""Deterministic scoring rubric.
+"""Deterministic scoring + tier classification.
 
 `score_call(facts)` is a pure function: same `CallFacts` → same `ScoreResult`.
-Score starts at 100 and deductions are subtracted, floored at 0.
-Bump RUBRIC_VERSION whenever weights or logic change; each version is stored
-alongside the score row for full auditability.
+Score starts at 100, deductions are subtracted, floored at 0. Bump
+RUBRIC_VERSION on any weight/logic change — it is stored on every score row
+for auditability.
+
+Tiers:
+  HOT  — pickup failed, restaurant abandoned the call, or score ≤ 40.
+  WARM — score 41-70. Some friction; worth an SDR call.
+  COLD — score ≥ 71. Phone experience adequate; lower priority.
 """
 
 from __future__ import annotations
 
-from mystery_shop.llm.schemas import CallFacts, Deduction, ScoreResult
-from mystery_shop.scoring.tiers import classify_tier
+from maple.llm.schemas import CallFacts, Deduction, ScoreResult, TierLiteral
 
 RUBRIC_VERSION = "v1"
+
+HOT_MAX = 40
+COLD_MIN = 71
+
+
+def classify_tier(
+    *,
+    pickup: bool,
+    call_abandoned_by_restaurant: bool,
+    numeric_score: int,
+) -> TierLiteral:
+    """Return the HOT/WARM/COLD tier for a scored call.
+
+    Categorical overrides (pickup failure, abandonment) always resolve to HOT
+    regardless of the numeric score.
+    """
+    if not pickup or call_abandoned_by_restaurant:
+        return "HOT"
+    if numeric_score <= HOT_MAX:
+        return "HOT"
+    if numeric_score >= COLD_MIN:
+        return "COLD"
+    return "WARM"
 
 
 def score_call(facts: CallFacts) -> ScoreResult:

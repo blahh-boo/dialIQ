@@ -13,7 +13,7 @@ from typing import Any
 import pandas as pd
 from sqlalchemy.orm import Session
 
-from mystery_shop.db.models import CallAttempt, Extraction, Lead, Score
+from maple.db import CallAttempt, Extraction, Lead, Score
 
 _TIER_ORDER = {"HOT": 0, "WARM": 1, "COLD": 2}
 
