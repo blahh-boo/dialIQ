@@ -54,7 +54,8 @@ make ui           # terminal 2 — frontend → http://localhost:5173
 
 Open **http://localhost:5173** — the SDR cockpit, populated with real extracted data.
 
-Run `make help` anytime to see every target.
+Run `make help` anytime to see every target. To check what's live or inspect
+the database, see [OPERATIONS.md](OPERATIONS.md).
 
 ### Why it's safe to re-run
 

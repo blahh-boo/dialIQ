@@ -78,11 +78,18 @@ def test_replay_loads_fixture_file() -> None:
     assert result.vapi_call_id.startswith("replay-")
 
 
-def test_replay_cycles_through_files() -> None:
+def test_replay_cycles_transcripts_with_unique_ids() -> None:
     provider = ReplayProvider(_FIXTURES)
     n = len(sorted(_FIXTURES.glob("*.json")))
-    ids = [provider.place_call(**_CALL_KWARGS).vapi_call_id for _ in range(n * 2)]  # type: ignore[arg-type]
-    assert ids[:n] == ids[n:]
+    placed = [provider.place_call(**_CALL_KWARGS) for _ in range(n * 2)]  # type: ignore[arg-type]
+
+    # Transcript content cycles every n calls (same fixtures, in order)...
+    report_ids = [p.report.call_id for p in placed if p.report]
+    assert report_ids[:n] == report_ids[n:]
+
+    # ...but every placed call has a UNIQUE vapi_call_id (DB constraint).
+    call_ids = [p.vapi_call_id for p in placed]
+    assert len(set(call_ids)) == len(call_ids)
 
 
 def test_replay_raises_on_empty_dir(tmp_path: Path) -> None:

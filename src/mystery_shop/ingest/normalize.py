@@ -76,6 +76,41 @@ _STATE_TZ: dict[str, str] = {
     "dc": "America/New_York",
 }
 
+# Full US state name (lowercase) → 2-letter USPS code. The `leads.state` column
+# is varchar(2); source files vary between "Virginia" and "VA", so normalize.
+_STATE_ABBR: dict[str, str] = {
+    "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR",
+    "california": "CA", "colorado": "CO", "connecticut": "CT", "delaware": "DE",
+    "florida": "FL", "georgia": "GA", "hawaii": "HI", "idaho": "ID",
+    "illinois": "IL", "indiana": "IN", "iowa": "IA", "kansas": "KS",
+    "kentucky": "KY", "louisiana": "LA", "maine": "ME", "maryland": "MD",
+    "massachusetts": "MA", "michigan": "MI", "minnesota": "MN",
+    "mississippi": "MS", "missouri": "MO", "montana": "MT", "nebraska": "NE",
+    "nevada": "NV", "new hampshire": "NH", "new jersey": "NJ",
+    "new mexico": "NM", "new york": "NY", "north carolina": "NC",
+    "north dakota": "ND", "ohio": "OH", "oklahoma": "OK", "oregon": "OR",
+    "pennsylvania": "PA", "rhode island": "RI", "south carolina": "SC",
+    "south dakota": "SD", "tennessee": "TN", "texas": "TX", "utah": "UT",
+    "vermont": "VT", "virginia": "VA", "washington": "WA",
+    "west virginia": "WV", "wisconsin": "WI", "wyoming": "WY",
+    "district of columbia": "DC",
+}
+
+
+def _normalize_state(raw: str | None) -> str | None:
+    """Return a 2-letter USPS state code, or None if it can't be resolved.
+
+    Handles both source formats: already-abbreviated ("VA") passes through
+    uppercased; a full name ("Virginia") is mapped. Anything unrecognized
+    returns None rather than overflowing the varchar(2) column.
+    """
+    if not raw:
+        return None
+    s = raw.strip()
+    if len(s) == 2 and s.isalpha():
+        return s.upper()
+    return _STATE_ABBR.get(s.lower())
+
 
 class PhoneParseError(ValueError):
     """Raised when a phone number cannot be normalized to E.164."""
@@ -188,8 +223,9 @@ def normalize_row(row: dict[str, Any], *, source_row_index: int) -> LeadIngest:
     restaurant_name = _name_from_url(website) if website else "Unknown Restaurant"
 
     postal_code = _normalize_postal_code(row.get("organization_postal_code"))
-    state = str(row["organization_state"]).strip() if row.get("organization_state") else None
-    timezone = _infer_timezone(postal_code, state)
+    raw_state = str(row["organization_state"]).strip() if row.get("organization_state") else None
+    timezone = _infer_timezone(postal_code, raw_state)  # _STATE_TZ is keyed by full name
+    state = _normalize_state(raw_state)  # store the 2-letter code (varchar(2))
 
     raw_reviews = row.get("Google Reviews Count")
     google_reviews_count: int | None = (

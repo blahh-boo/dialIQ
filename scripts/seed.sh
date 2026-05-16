@@ -17,7 +17,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 LIMIT="${LIMIT:-20}"
-LEADS_XLSX="${LEADS_XLSX:-Restaurant Phone Numbers - Maple Take Home Round 2.xlsx}"
+LEADS_XLSX="${LEADS_XLSX:-data.xlsx}"
 LOCK_DIR=".seed.lock"
 
 say()  { printf '\n\033[1;34m▸ %s\033[0m\n' "$1"; }
@@ -85,7 +85,10 @@ say "Resetting call data (clean slate)"
 uv run mystery-shop reset --yes
 
 say "Running campaign — ${LIMIT} ${RUN_MODE} calls"
-uv run mystery-shop campaign --limit "$LIMIT"
+# Seeding is for demo data on canned transcripts — no real restaurant is dialed,
+# so the 11am-2pm gate would only block you. The RUN_MODE guard above already
+# refuses live mode, so this flag is safe here.
+uv run mystery-shop campaign --limit "$LIMIT" --ignore-business-hours
 
 say "Writing ranked.csv"
 uv run mystery-shop export-ranked
