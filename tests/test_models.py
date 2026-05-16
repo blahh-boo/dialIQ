@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from mystery_shop.db.models import (
+from maple.db import (
     AnsweredBy,
+    Base,
     CallAttempt,
     CallStatus,
     Extraction,
@@ -12,7 +13,6 @@ from mystery_shop.db.models import (
     Tier,
     Transcript,
 )
-from mystery_shop.db.session import Base
 
 EXPECTED_TABLES = {"leads", "call_attempts", "transcripts", "extractions", "scores"}
 

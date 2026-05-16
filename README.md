@@ -29,7 +29,7 @@ leads (DB)
 ranked.csv ◄── export-ranked: HOT first, worst score first within tier
 ```
 
-Five tables: `leads`, `call_attempts`, `transcripts`, `extractions`, `scores`. Full DDL in [migrations/versions/0001_initial.py](migrations/versions/0001_initial.py).
+Five tables: `leads`, `call_attempts`, `transcripts`, `extractions`, `scores`. Models + schema bootstrap in [maple/db.py](maple/db.py) (no Alembic — `init_db()` builds it from the models).
 
 ## Quick start
 
@@ -55,7 +55,7 @@ make ui           # terminal 2 — frontend → http://localhost:5173
 Open **http://localhost:5173** — the SDR cockpit, populated with real extracted data.
 
 Run `make help` anytime to see every target. To check what's live or inspect
-the database, see [OPERATIONS.md](OPERATIONS.md).
+the database, see the [Operations](#operations) section.
 
 ### Why it's safe to re-run
 
@@ -67,16 +67,16 @@ fully recovers on the next `make seed`. Protections built into `make seed`:
 - **Refuses `RUN_MODE=live`** (would place real calls) unless you explicitly opt in with `ALLOW_LIVE=1`
 - **Lockfile** — two seeds can't run at once; interrupted seeds release the lock cleanly
 - **`doctor` gate** — bad env / DB / API key aborts *before* any data is written
-- **Schema check** — refuses to seed if migrations aren't applied (tells you to run `make setup`)
+- **Schema check** — refuses to seed if the schema is missing (tells you to run `make setup`)
 - **`reset` refuses `--yes` against a non-local database** — an automated seed can never truncate a remote/prod DB
 
 ### What each command does under the hood
 
 | `make` target | Equivalent manual commands |
 |---|---|
-| `make setup`  | `pg_isready` → `createdb mysteryshop` → `uv run alembic upgrade head` → `uv run mystery-shop doctor` |
-| `make seed`   | `ingest "…xlsx"` → `mystery-shop reset --yes` → `campaign --limit 20` → `export-ranked` |
-| `make api`    | `uv run uvicorn mystery_shop.webhook.app:app --reload` |
+| `make setup`  | `pg_isready` → `createdb mysteryshop` → `uv run mystery-shop init-db` → `uv run mystery-shop doctor` |
+| `make seed`   | `ingest data.xlsx` → `mystery-shop reset --yes` → `campaign --limit 20 --ignore-business-hours` → `export-ranked` |
+| `make api`    | `uv run uvicorn maple.web.app:app --reload` |
 | `make ui`     | `npm --prefix frontend run dev` |
 | `make reset`  | `uv run mystery-shop reset` (interactive confirm; wipes call data, keeps leads) |
 
@@ -114,9 +114,9 @@ Live mode requires the four `VAPI_*` env vars (enforced by config validator).
 
 ## The 10 CallFacts (extraction shape)
 
-Defined in [src/mystery_shop/llm/schemas.py](src/mystery_shop/llm/schemas.py). Strict tool use guarantees schema-valid output. Per-field confidence + evidence live in nested `ExtractionMetadata`.
+Defined in [maple/llm/schemas.py](maple/llm/schemas.py). Strict tool use guarantees schema-valid output. Per-field confidence + evidence live in nested `ExtractionMetadata`.
 
-**Scored** (fed into [src/mystery_shop/scoring/rubric.py](src/mystery_shop/scoring/rubric.py)):
+**Scored** (fed into [maple/scoring.py](maple/scoring.py)):
 
 1. `pickup: bool` — load-bearing; `False` is always HOT
 2. `rings_to_answer: int | None`
@@ -188,39 +188,132 @@ uv run pytest
 ## Project layout
 
 ```
-src/mystery_shop/
-├── cli.py                  # typer subcommands (doctor, ingest, campaign, ...)
-├── config.py               # pydantic-settings, RUN_MODE validation
-├── db/
-│   ├── models.py           # 5 SQLAlchemy models (Mapped/mapped_column)
-│   └── session.py          # session_scope() commit-on-success
-├── ingest/
-│   ├── normalize.py        # phone E.164, zip zero-pad, tz inference
-│   └── xlsx_loader.py      # pandas → leads (idempotent via on_conflict_do_nothing)
-├── voice/
-│   ├── base.py             # VoiceProvider Protocol + Pydantic IO models
-│   ├── mock_provider.py    # delegates to ReplayProvider over samples/transcripts/
-│   ├── replay_provider.py  # cycles through transcript JSONs
-│   └── vapi_provider.py    # real outbound calls
+maple/
+├── cli.py            # typer subcommands (doctor, init-db, ingest, campaign, ...)
+├── config.py         # pydantic-settings, RUN_MODE validation
+├── db.py             # 5 SQLAlchemy models + session_scope() + init_db() (no Alembic)
+├── ingest.py         # phone E.164, zip zero-pad, tz + state norm, xlsx → leads
+├── voice.py          # VoiceProvider Protocol + mock / replay / live Vapi providers
+├── scoring.py        # pure rubric (same CallFacts → same ScoreResult) + tiers
+├── scheduling.py     # business hours + interleave + campaign loop
+├── export.py         # ranked.csv SDR deliverable
 ├── llm/
-│   ├── claude_client.py    # thin Anthropic wrapper with prompt caching
-│   ├── precall.py          # Sonnet: cuisine_type + order_item
-│   ├── classifier.py       # Haiku: answered_by
-│   ├── extractor.py        # Sonnet: 10 CallFacts via strict tool use
-│   ├── summarizer.py       # Haiku: one-line SDR brief
-│   ├── prompts/            # versioned .txt files (filename stored on each extraction row)
-│   └── schemas.py          # CallFacts, ScoreResult, ExtractionMetadata
-├── scoring/
-│   ├── rubric.py           # pure function — same input → same output
-│   └── tiers.py            # HOT/WARM/COLD thresholds
-├── scheduling/
-│   ├── business_hours.py   # 11am-2pm local window
-│   ├── interleave.py       # don't dial the same number twice in a row
-│   └── worker.py           # campaign loop: classify → extract → score → summarize
-├── webhook/
-│   ├── app.py              # FastAPI: POST /vapi/webhook, GET /health
-│   ├── pipeline.py         # same 4-pass extraction, async path
-│   └── vapi_models.py      # Pydantic models for the incoming Vapi payload
-└── export/
-    └── ranked_csv.py       # final SDR deliverable
+│   ├── client.py     # thin Anthropic wrapper with prompt caching
+│   ├── schemas.py    # CallFacts, ScoreResult, ExtractionMetadata
+│   ├── extractor.py  # Sonnet: 10 CallFacts via strict tool use (the heavy pass)
+│   ├── passes.py     # the 3 short passes: precall, classifier, SDR one-liner
+│   └── prompts/      # versioned .txt files (filename stored on each extraction row)
+└── web/
+    ├── app.py        # FastAPI: POST /vapi/webhook, GET /health, mounts /api
+    ├── routes.py     # /api/* cockpit endpoints
+    ├── pipeline.py   # webhook-path extraction pipeline
+    └── models.py     # Vapi payload models + cockpit API response schemas
 ```
+
+Schema changes: edit a model in `db.py`, then `dropdb mysteryshop && make setup`.
+The DB is disposable and local — `make seed` rebuilds it deterministically.
+
+## Operations
+A quick reference for knowing the state of the system at any moment, and for
+inspecting the database directly.
+
+## Is each piece alive?
+
+| Component | Check | Healthy output |
+|---|---|---|
+| **Postgres server** | `pg_isready -h localhost -p 5432` | `localhost:5432 - accepting connections` |
+| **Database + schema + key** | `uv run mystery-shop doctor` | three `[OK]` lines |
+| **Backend API** | `curl -s localhost:8000/health` | `{"status":"ok"}` |
+| **Backend has data** | `curl -s localhost:8000/api/campaign/stats` | JSON with `mystery_shopped > 0` |
+| **Frontend** | open `http://localhost:5173` | the cockpit renders |
+| **Which run mode** | `grep '^RUN_MODE=' .env` | `mock` / `replay` / `live` |
+| **Postgres background service** | `brew services list \| grep postgres` | `started` |
+
+If `doctor` is green but the queue is empty, the DB is live but unseeded — run `make seed`.
+
+## Inspecting the database
+
+Open a SQL shell on the project DB:
+
+```bash
+psql mysteryshop
+```
+
+Useful `psql` meta-commands (inside the shell):
+
+| Command | Shows |
+|---|---|
+| `\dt` | all tables |
+| `\d leads` | the `leads` table's columns + indexes |
+| `\d+ scores` | same, with extra detail |
+| `\x` | toggle expanded (row-per-line) display — good for wide rows |
+| `\q` | quit |
+
+One-liners without entering the shell:
+
+```bash
+psql mysteryshop -c "SELECT count(*) FROM leads;"
+psql mysteryshop -c "SELECT tier, count(*) FROM scores GROUP BY tier;"
+```
+
+## The 5 tables and what fills them
+
+```
+leads ──< call_attempts ──< extractions ──< scores
+                   └──── transcripts (1:1 with call_attempts)
+```
+
+| Table | Filled by | "Is it populated?" query |
+|---|---|---|
+| `leads` | `make seed` → `ingest` | `SELECT count(*) FROM leads;` |
+| `call_attempts` | `make seed` → `campaign` | `SELECT count(*) FROM call_attempts;` |
+| `transcripts` | `campaign` (one per call) | `SELECT count(*) FROM transcripts;` |
+| `extractions` | `campaign` (Claude 10-field extract) | `SELECT count(*) FROM extractions;` |
+| `scores` | `campaign` (deterministic scorer) | `SELECT count(*) FROM scores;` |
+
+A healthy seeded DB has: many `leads`, and `call_attempts = transcripts = extractions = scores = <campaign --limit N>`.
+
+## Handy diagnostic queries
+
+```sql
+-- tier distribution (what the cockpit queue is grouped by)
+SELECT tier, count(*), round(avg(numeric_score)) AS avg
+FROM scores GROUP BY tier ORDER BY tier;
+
+-- the SDR queue, exactly as the cockpit orders it (HOT first, worst first)
+SELECT l.restaurant_name, s.tier, s.numeric_score, s.summary_one_liner
+FROM scores s
+JOIN extractions e ON e.id = s.extraction_id
+JOIN call_attempts c ON c.id = e.call_attempt_id
+JOIN leads l ON l.id = c.lead_id
+ORDER BY array_position(ARRAY['HOT','WARM','COLD']::text[], s.tier::text),
+         s.numeric_score ASC
+LIMIT 20;
+
+-- did any call not get picked up? (always HOT)
+SELECT l.restaurant_name, e.answered_by, s.tier
+FROM scores s
+JOIN extractions e ON e.id = s.extraction_id
+JOIN call_attempts c ON c.id = e.call_attempt_id
+JOIN leads l ON l.id = c.lead_id
+WHERE s.pickup = false;
+```
+
+## Resetting state
+
+| Want | Command |
+|---|---|
+| Wipe call data, keep leads (interactive confirm) | `make reset` |
+| Wipe + reload deterministic demo data | `make seed` (does reset → campaign internally) |
+| Nuke the whole DB and start over | `dropdb mysteryshop && make setup && make seed` |
+
+`make seed` is re-run-safe by construction — running it again always yields the
+identical queue (it resets call data before re-running the campaign).
+
+## Where the servers log
+
+- **Backend** (`make api`): logs to the terminal it runs in. Extraction/scoring
+  progress and the token-usage line print here.
+- **Frontend** (`make ui`): Vite dev server output; build errors show in the
+  browser console and that terminal.
+- Nothing logs to a file by default (local-first, `LOG_LEVEL` in `.env`).

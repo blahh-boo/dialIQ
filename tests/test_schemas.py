@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
-
-from mystery_shop.llm.schemas import (
+from maple.llm.schemas import (
     CallFacts,
     Deduction,
     FieldEvidence,
     ScoreResult,
 )
+from pydantic import ValidationError
+
 from tests.factories import make_call_facts, make_extraction_metadata
 
 

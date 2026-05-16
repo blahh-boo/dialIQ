@@ -1,17 +1,24 @@
-"""Campaign worker: pick eligible leads, fire calls, persist results."""
+"""Campaign scheduling: business-hours gate, interleave, and the campaign loop.
+
+- `is_callable_now` / `is_callable_at` — only dial during 11am-2pm local time.
+- `next_lead` — never call the same restaurant twice in a row.
+- `run_campaign` — pick eligible leads, place calls, run the pipeline, persist.
+"""
 
 from __future__ import annotations
 
 import logging
+import zoneinfo
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
 
-from mystery_shop.db.models import (
+from maple.db import (
     AnsweredBy as DBAnsweredBy,
 )
-from mystery_shop.db.models import (
+from maple.db import (
     CallAttempt,
     CallStatus,
     Extraction,
@@ -19,21 +26,63 @@ from mystery_shop.db.models import (
     Score,
     Transcript,
 )
-from mystery_shop.llm.classifier import classify_answered_by
-from mystery_shop.llm.claude_client import ClaudeClient
-from mystery_shop.llm.extractor import EXTRACTOR_MODEL, EXTRACTOR_PROMPT_VERSION, extract_call_facts
-from mystery_shop.llm.precall import infer_cuisine_and_order
-from mystery_shop.llm.summarizer import generate_one_liner
-from mystery_shop.scheduling.business_hours import is_callable_now
-from mystery_shop.scheduling.interleave import next_lead
-from mystery_shop.scoring.rubric import RUBRIC_VERSION, score_call
-from mystery_shop.voice.base import EndOfCallReport, VoiceProvider
+from maple.llm.client import ClaudeClient
+from maple.llm.extractor import EXTRACTOR_MODEL, EXTRACTOR_PROMPT_VERSION, extract_call_facts
+from maple.llm.passes import classify_answered_by, generate_one_liner, infer_cuisine_and_order
+from maple.scoring import RUBRIC_VERSION, score_call
+from maple.voice import EndOfCallReport, VoiceProvider
 
 logger = logging.getLogger(__name__)
 
 _SHOPPER_NAME = "Alex"
 
+# ── Business hours ──────────────────────────────────────────────────────────
+# Call window: 11:00 AM - 2:00 PM local time (restaurant's timezone).
+# Approximation is intentional — state-level tz resolution; ±1h is fine.
+CALL_OPEN_HOUR = 11  # 11:00 AM local
+CALL_CLOSE_HOUR = 14  # 2:00 PM local (exclusive → last eligible start is 1:59 PM)
 
+
+def is_callable_now(timezone_name: str | None) -> bool:
+    """True if the current local time in *timezone_name* is within the call window."""
+    if not timezone_name:
+        return False
+    try:
+        tz = zoneinfo.ZoneInfo(timezone_name)
+    except (zoneinfo.ZoneInfoNotFoundError, KeyError):
+        return False
+    local = datetime.now(tz)
+    return CALL_OPEN_HOUR <= local.hour < CALL_CLOSE_HOUR
+
+
+def is_callable_at(timezone_name: str | None, when: datetime) -> bool:
+    """True if *when* (tz-aware) falls inside the call window for *timezone_name*."""
+    if not timezone_name:
+        return False
+    try:
+        tz = zoneinfo.ZoneInfo(timezone_name)
+    except (zoneinfo.ZoneInfoNotFoundError, KeyError):
+        return False
+    local = when.astimezone(tz)
+    return CALL_OPEN_HOUR <= local.hour < CALL_CLOSE_HOUR
+
+
+# ── Interleave ──────────────────────────────────────────────────────────────
+def next_lead(candidates: list[Lead], *, last_called_id: int | None) -> Lead | None:
+    """Return the first lead in *candidates* that is not *last_called_id*.
+
+    Falls back to the first candidate if every remaining lead is the same as the
+    last (e.g., only one lead left in the queue).
+    """
+    if not candidates:
+        return None
+    for lead in candidates:
+        if lead.id != last_called_id:
+            return lead
+    return candidates[0]
+
+
+# ── Campaign loop ───────────────────────────────────────────────────────────
 @dataclass(frozen=True)
 class CampaignResult:
     called: int

@@ -1,23 +1,91 @@
-"""SQLAlchemy ORM models for Mystery Shop.
+"""Database layer: engine, session, declarative Base, the 5 ORM models, and
+schema bootstrap.
 
 Schema overview:
     leads ──< call_attempts ──< extractions ──< scores
                        └──── transcripts (1:1)
+
+`init_db()` builds the whole schema from the models in one call (replaces
+Alembic — the DB is disposable/local; `make seed` rebuilds it).
 """
 
 from __future__ import annotations
 
+from collections.abc import Generator
+from contextlib import contextmanager
 from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
+from functools import lru_cache
 from typing import Any
 
 import sqlalchemy as sa
-from sqlalchemy import ForeignKey, Index, text
+from sqlalchemy import Engine, ForeignKey, Index, create_engine, text
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import (
+    DeclarativeBase,
+    Mapped,
+    Session,
+    mapped_column,
+    relationship,
+    sessionmaker,
+)
 
-from mystery_shop.db.session import Base
+from maple.config import get_settings
+
+
+class Base(DeclarativeBase):
+    """Declarative base for all ORM models."""
+
+
+@lru_cache(maxsize=1)
+def get_engine() -> Engine:
+    """Return the cached SQLAlchemy engine."""
+    return create_engine(
+        get_settings().database_url,
+        pool_pre_ping=True,
+        future=True,
+    )
+
+
+@lru_cache(maxsize=1)
+def _session_factory() -> sessionmaker[Session]:
+    return sessionmaker(
+        bind=get_engine(),
+        autocommit=False,
+        autoflush=False,
+        expire_on_commit=False,
+        class_=Session,
+    )
+
+
+def get_session() -> Session:
+    """Return a new SQLAlchemy session bound to the cached engine."""
+    return _session_factory()()
+
+
+@contextmanager
+def session_scope() -> Generator[Session, None, None]:
+    """Yield a session that commits on success and rolls back on exception."""
+    session = get_session()
+    try:
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+def init_db() -> None:
+    """Create every table from the ORM models. Idempotent (`checkfirst`).
+
+    Replaces Alembic: the schema's single source of truth is the models below,
+    and the local DB is disposable. To change the schema: edit a model, then
+    `dropdb mysteryshop && make setup`.
+    """
+    Base.metadata.create_all(get_engine())
 
 
 class CallStatus(StrEnum):

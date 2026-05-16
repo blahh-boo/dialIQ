@@ -12,7 +12,10 @@ import phonenumbers
 from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from mystery_shop.api.schemas import (
+from maple.db import CallAttempt, Extraction, Lead, Score, Transcript, session_scope
+from maple.llm.schemas import CallFacts
+from maple.scoring import score_call
+from maple.web.models import (
     CampaignStats,
     LeadCallInfo,
     LeadDetailResponse,
@@ -22,10 +25,6 @@ from mystery_shop.api.schemas import (
     SdrState,
     TranscriptTurn,
 )
-from mystery_shop.db.models import CallAttempt, Extraction, Lead, Score, Transcript
-from mystery_shop.db.session import session_scope
-from mystery_shop.llm.schemas import CallFacts
-from mystery_shop.scoring.rubric import score_call
 
 router = APIRouter(prefix="/api", tags=["cockpit"])
 
@@ -40,7 +39,9 @@ def _phone_display(e164: str) -> str:
         return e164
 
 
-def _build_lead_response(lead: Lead, attempt: CallAttempt, extraction: Extraction, score: Score) -> LeadResponse:
+def _build_lead_response(
+    lead: Lead, attempt: CallAttempt, extraction: Extraction, score: Score
+) -> LeadResponse:
     facts = CallFacts.model_validate(extraction.fields_jsonb)
     score_result = score_call(facts)
 
@@ -101,7 +102,8 @@ def list_leads(
     if q:
         ql = q.lower()
         leads = [
-            lr for lr in leads
+            lr
+            for lr in leads
             if ql in lr.restaurant_name.lower()
             or (lr.city or "").lower().startswith(ql)
             or (lr.cuisine_type or "").lower().startswith(ql)

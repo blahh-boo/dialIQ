@@ -1,6 +1,6 @@
 """Shared pytest fixtures.
 
-Sets default env vars so `mystery_shop.config.Settings` validates without a real
+Sets default env vars so `maple.config.Settings` validates without a real
 .env present during unit-test runs. Integration tests that need a live DB / API
 should explicitly override these.
 """

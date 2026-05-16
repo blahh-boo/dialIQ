@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import mystery_shop
-from mystery_shop.config import RunMode, Settings
+import maple
+from maple.config import RunMode, Settings
 
 
 def test_package_has_version() -> None:
-    assert isinstance(mystery_shop.__version__, str)
-    assert mystery_shop.__version__
+    assert isinstance(maple.__version__, str)
+    assert maple.__version__
 
 
 def test_settings_load_with_defaults() -> None:

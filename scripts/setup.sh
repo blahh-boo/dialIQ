@@ -40,10 +40,10 @@ else
     || die "createdb failed for '${DB_NAME}'"
 fi
 
-# ── 3. Apply migrations (alembic upgrade is a no-op when already at head) ────
-say "Applying migrations"
-uv run alembic upgrade head
-ok "Schema at head"
+# ── 3. Create schema from the ORM models (idempotent — no Alembic) ──────────
+say "Creating schema"
+uv run mystery-shop init-db
+ok "Schema present"
 
 # ── 4. Final gate: doctor must pass (exits non-zero on any problem) ─────────
 say "Running health check"

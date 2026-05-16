@@ -10,7 +10,6 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Proprietary" }
 dependencies = [
-    "alembic==1.18.4",
     "anthropic==0.102.0",
     "fastapi>=0.115,<0.116",
     "openpyxl>=3.1,<4",
@@ -29,7 +28,7 @@ dependencies = [
 ]
 
 [project.scripts]
-mystery-shop = "mystery_shop.cli:app"
+mystery-shop = "maple.cli:app"
 
 [dependency-groups]
 dev = [
@@ -46,12 +45,12 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/mystery_shop"]
+packages = ["maple"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-src = ["src", "tests"]
+src = ["maple", "tests"]
 
 [tool.ruff.lint]
 select = [
@@ -77,11 +76,8 @@ ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "ARG"]
-"migrations/**" = ["ERA"]
 # Protocol implementors that intentionally ignore call parameters
-"src/mystery_shop/voice/mock_provider.py" = ["ARG002"]
-"src/mystery_shop/voice/replay_provider.py" = ["ARG002"]
-"src/mystery_shop/voice/vapi_provider.py" = ["ARG002"]
+"maple/voice.py" = ["ARG002"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -94,7 +90,7 @@ warn_redundant_casts = true
 warn_unreachable = true
 explicit_package_bases = true
 namespace_packages = true
-mypy_path = ["src"]
+mypy_path = ["."]
 
 [[tool.mypy.overrides]]
 module = ["pgeocode", "timezonefinder", "vapi.*", "vapi_server_sdk.*"]
@@ -110,7 +106,7 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["src/mystery_shop"]
+source = ["maple"]
 branch = true
 
 [tool.coverage.report]

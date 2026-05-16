@@ -8,9 +8,8 @@ point directly at the broken weight.
 from __future__ import annotations
 
 import pytest
+from maple.scoring import COLD_MIN, HOT_MAX, RUBRIC_VERSION, classify_tier, score_call
 
-from mystery_shop.scoring.rubric import RUBRIC_VERSION, score_call
-from mystery_shop.scoring.tiers import COLD_MIN, HOT_MAX, classify_tier
 from tests.factories import make_call_facts
 
 # ── tier classification ───────────────────────────────────────────────────────

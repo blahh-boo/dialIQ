@@ -6,10 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
-
-from mystery_shop.voice.base import EndOfCallReport, PlacedCall, VoiceProvider
-from mystery_shop.voice.mock_provider import MockProvider
-from mystery_shop.voice.replay_provider import ReplayProvider
+from maple.voice import EndOfCallReport, MockProvider, PlacedCall, ReplayProvider, VoiceProvider
 
 _FIXTURES = Path(__file__).parent.parent / "samples" / "transcripts"
 

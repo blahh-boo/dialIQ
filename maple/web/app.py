@@ -15,12 +15,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-from mystery_shop.api.routes import router as api_router
-from mystery_shop.config import get_settings
-from mystery_shop.db.session import session_scope
-from mystery_shop.llm.claude_client import ClaudeClient
-from mystery_shop.webhook.pipeline import run_extraction_pipeline, upsert_call_attempt
-from mystery_shop.webhook.vapi_models import VapiEndOfCallReport
+from maple.config import get_settings
+from maple.db import session_scope
+from maple.llm.client import ClaudeClient
+from maple.web.models import VapiEndOfCallReport
+from maple.web.pipeline import run_extraction_pipeline, upsert_call_attempt
+from maple.web.routes import router as api_router
 
 logger = logging.getLogger(__name__)
 

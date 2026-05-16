@@ -19,7 +19,7 @@ reset:  ## Wipe call data only (interactive confirm); leaves leads intact
 	@uv run mystery-shop reset
 
 api:  ## Run the backend (terminal 1)
-	@uv run uvicorn mystery_shop.webhook.app:app --reload
+	@uv run uvicorn maple.web.app:app --reload
 
 ui:  ## Run the frontend (terminal 2)
 	@npm --prefix frontend run dev

@@ -20,8 +20,8 @@ def doctor() -> None:
     from pydantic import ValidationError
     from sqlalchemy import text
 
-    from mystery_shop.config import RunMode, get_settings
-    from mystery_shop.db.session import session_scope
+    from maple.config import RunMode, get_settings
+    from maple.db import session_scope
 
     def ok(label: str, detail: str = "") -> None:
         typer.echo(f"  [OK]   {label}" + (f" — {detail}" if detail else ""))
@@ -73,11 +73,23 @@ def doctor() -> None:
         raise typer.Exit(1)
 
 
+@app.command(name="init-db")
+def init_db() -> None:
+    """Create all tables from the ORM models (replaces Alembic).
+
+    Idempotent. The schema's single source of truth is maple/db.py.
+    """
+    from maple.db import init_db as _init
+
+    _init()
+    typer.echo("Schema created (all tables present).")
+
+
 @app.command()
 def ingest(xlsx_path: str) -> None:
     """Load + normalize a lead list from xlsx into the leads table."""
-    from mystery_shop.db.session import session_scope
-    from mystery_shop.ingest.xlsx_loader import load_xlsx
+    from maple.db import session_scope
+    from maple.ingest import load_xlsx
 
     path = Path(xlsx_path)
     if not path.exists():
@@ -104,18 +116,18 @@ def campaign(
     ),
 ) -> None:
     """Fire up to N calls respecting business hours and interleave rules."""
-    from mystery_shop.config import RunMode, get_settings
-    from mystery_shop.db.session import session_scope
-    from mystery_shop.llm.claude_client import ClaudeClient
-    from mystery_shop.scheduling.worker import run_campaign
-    from mystery_shop.voice.base import VoiceProvider
+    from maple.config import RunMode, get_settings
+    from maple.db import session_scope
+    from maple.llm.client import ClaudeClient
+    from maple.scheduling import run_campaign
+    from maple.voice import VoiceProvider
 
     settings = get_settings()
     client = ClaudeClient(settings.anthropic_api_key.get_secret_value())
 
     provider: VoiceProvider
     if settings.run_mode is RunMode.LIVE:
-        from mystery_shop.voice.vapi_provider import VapiProvider
+        from maple.voice import VapiProvider
 
         provider = VapiProvider(
             api_key=settings.vapi_api_key.get_secret_value(),  # type: ignore[union-attr]
@@ -123,12 +135,12 @@ def campaign(
         )
         assistant_id = settings.vapi_assistant_id or ""
     elif settings.run_mode is RunMode.REPLAY:
-        from mystery_shop.voice.replay_provider import ReplayProvider
+        from maple.voice import ReplayProvider
 
         provider = ReplayProvider(transcripts_dir=Path("samples/transcripts"))
         assistant_id = "replay"
     else:
-        from mystery_shop.voice.mock_provider import MockProvider
+        from maple.voice import MockProvider
 
         provider = MockProvider()
         assistant_id = "mock"
@@ -157,10 +169,9 @@ def score(call_attempt_id: int = typer.Option(..., "--call-attempt-id")) -> None
     """Re-score an existing call attempt against the current rubric."""
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-    from mystery_shop.db.models import CallAttempt, Extraction, Score
-    from mystery_shop.db.session import session_scope
-    from mystery_shop.llm.schemas import CallFacts
-    from mystery_shop.scoring.rubric import RUBRIC_VERSION, score_call
+    from maple.db import CallAttempt, Extraction, Score, session_scope
+    from maple.llm.schemas import CallFacts
+    from maple.scoring import RUBRIC_VERSION, score_call
 
     with session_scope() as session:
         attempt = session.get(CallAttempt, call_attempt_id)
@@ -208,13 +219,12 @@ def score(call_attempt_id: int = typer.Option(..., "--call-attempt-id")) -> None
 @app.command()
 def replay(transcript_path: str) -> None:
     """Run the full extraction pipeline against a saved transcript JSON (no DB write)."""
-    from mystery_shop.config import get_settings
-    from mystery_shop.llm.classifier import classify_answered_by
-    from mystery_shop.llm.claude_client import ClaudeClient
-    from mystery_shop.llm.extractor import extract_call_facts
-    from mystery_shop.llm.summarizer import generate_one_liner
-    from mystery_shop.scoring.rubric import score_call
-    from mystery_shop.voice.base import EndOfCallReport
+    from maple.config import get_settings
+    from maple.llm.client import ClaudeClient
+    from maple.llm.extractor import extract_call_facts
+    from maple.llm.passes import classify_answered_by, generate_one_liner
+    from maple.scoring import score_call
+    from maple.voice import EndOfCallReport
 
     path = Path(transcript_path)
     if not path.exists():
@@ -268,9 +278,8 @@ def reset(
 
     from sqlalchemy import func, text
 
-    from mystery_shop.config import get_settings
-    from mystery_shop.db.models import CallAttempt, Extraction, Score, Transcript
-    from mystery_shop.db.session import session_scope
+    from maple.config import get_settings
+    from maple.db import CallAttempt, Extraction, Score, Transcript, session_scope
 
     settings = get_settings()
 
@@ -323,8 +332,8 @@ def export_ranked(
     output: str = typer.Option("samples/ranked.csv", "--output", "-o"),
 ) -> None:
     """Write ranked.csv sorted by SDR priority (HOT first, worst score first)."""
-    from mystery_shop.db.session import session_scope
-    from mystery_shop.export.ranked_csv import write_ranked_csv
+    from maple.db import session_scope
+    from maple.export import write_ranked_csv
 
     output_path = Path(output)
     with session_scope() as session:

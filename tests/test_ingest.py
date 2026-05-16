@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import pytest
-
-from mystery_shop.ingest.normalize import (
+from maple.ingest import (
     PhoneParseError,
     _infer_timezone,
     _name_from_url,

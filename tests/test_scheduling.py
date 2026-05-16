@@ -5,13 +5,12 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-
-from mystery_shop.scheduling.business_hours import (
+from maple.scheduling import (
     CALL_CLOSE_HOUR,
     CALL_OPEN_HOUR,
     is_callable_at,
+    next_lead,
 )
-from mystery_shop.scheduling.interleave import next_lead
 
 # ── is_callable_at ────────────────────────────────────────────────────────────
 

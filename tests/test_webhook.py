@@ -6,9 +6,8 @@ from typing import Any
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
-
-from mystery_shop.webhook.app import app
-from mystery_shop.webhook.vapi_models import VapiEndOfCallReport
+from maple.web.app import app
+from maple.web.models import VapiEndOfCallReport
 
 client = TestClient(app)
 
@@ -66,7 +65,7 @@ def test_health_returns_ok() -> None:
 
 
 def test_no_secret_configured_allows_all() -> None:
-    with patch("mystery_shop.webhook.app.get_settings") as mock_settings:
+    with patch("maple.web.app.get_settings") as mock_settings:
         mock_settings.return_value.vapi_webhook_secret = None
         resp = client.post("/vapi/webhook", json=_end_of_call_payload())
     assert resp.status_code == 200
@@ -75,7 +74,7 @@ def test_no_secret_configured_allows_all() -> None:
 def test_wrong_secret_returns_401() -> None:
     from pydantic import SecretStr
 
-    with patch("mystery_shop.webhook.app.get_settings") as mock_settings:
+    with patch("maple.web.app.get_settings") as mock_settings:
         mock_settings.return_value.vapi_webhook_secret = SecretStr("correct-secret")
         resp = client.post(
             "/vapi/webhook",
@@ -89,8 +88,8 @@ def test_correct_secret_returns_200() -> None:
     from pydantic import SecretStr
 
     with (
-        patch("mystery_shop.webhook.app.get_settings") as mock_settings,
-        patch("mystery_shop.webhook.app._process_end_of_call"),
+        patch("maple.web.app.get_settings") as mock_settings,
+        patch("maple.web.app._process_end_of_call"),
     ):
         mock_settings.return_value.vapi_webhook_secret = SecretStr("correct-secret")
         resp = client.post(
@@ -106,8 +105,8 @@ def test_correct_secret_returns_200() -> None:
 
 def test_end_of_call_returns_ok() -> None:
     with (
-        patch("mystery_shop.webhook.app.get_settings") as mock_settings,
-        patch("mystery_shop.webhook.app._process_end_of_call"),
+        patch("maple.web.app.get_settings") as mock_settings,
+        patch("maple.web.app._process_end_of_call"),
     ):
         mock_settings.return_value.vapi_webhook_secret = None
         resp = client.post("/vapi/webhook", json=_end_of_call_payload())
@@ -116,21 +115,21 @@ def test_end_of_call_returns_ok() -> None:
 
 
 def test_status_update_returns_ok() -> None:
-    with patch("mystery_shop.webhook.app.get_settings") as mock_settings:
+    with patch("maple.web.app.get_settings") as mock_settings:
         mock_settings.return_value.vapi_webhook_secret = None
         resp = client.post("/vapi/webhook", json=_status_update_payload())
     assert resp.status_code == 200
 
 
 def test_unknown_message_type_returns_ok() -> None:
-    with patch("mystery_shop.webhook.app.get_settings") as mock_settings:
+    with patch("maple.web.app.get_settings") as mock_settings:
         mock_settings.return_value.vapi_webhook_secret = None
         resp = client.post("/vapi/webhook", json={"message": {"type": "speech-update"}})
     assert resp.status_code == 200
 
 
 def test_empty_body_returns_ok() -> None:
-    with patch("mystery_shop.webhook.app.get_settings") as mock_settings:
+    with patch("maple.web.app.get_settings") as mock_settings:
         mock_settings.return_value.vapi_webhook_secret = None
         resp = client.post("/vapi/webhook", json={})
     assert resp.status_code == 200
