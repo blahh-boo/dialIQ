@@ -154,10 +154,15 @@ def get_lead(lead_id: int) -> LeadDetailResponse:
 
 
 def _map_role(vapi_role: Any) -> str | None:
-    """Map Vapi role names → frontend role names."""
-    if vapi_role == "user":
-        return "shopper"
+    """Map transcript role names → frontend role names.
+
+    Our Vapi assistant ("Takeout Order Caller") IS the Maple mystery shopper,
+    so role="assistant" is the shopper placing the order and role="user" is the
+    restaurant answering. The canned fixtures follow the same convention.
+    """
     if vapi_role == "assistant":
+        return "shopper"
+    if vapi_role == "user":
         return "restaurant"
     if vapi_role == "system":
         return "system"

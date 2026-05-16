@@ -143,8 +143,8 @@ def test_normalize_row_produces_valid_lead() -> None:
     lead = normalize_row(_sample_row(), source_row_index=0)
     assert lead.phone_e164 == "+14345849382"
     assert lead.restaurant_name == "313Franklin"
-    assert lead.state == "Virginia"
-    assert lead.timezone == "America/New_York"
+    assert lead.state == "VA"  # full name normalized to 2-letter USPS code (varchar(2))
+    assert lead.timezone == "America/New_York"  # tz still inferred from full "Virginia"
     assert lead.postal_code == "23970"
     assert lead.source_row_index == 0
 

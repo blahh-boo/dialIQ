@@ -41,16 +41,22 @@ class CampaignResult:
     skipped_queue: int  # leads skipped — interleave or exhausted queue
 
 
-def get_callable_leads(session: Session, *, fetch_limit: int) -> list[Lead]:
+def get_callable_leads(
+    session: Session, *, fetch_limit: int, ignore_business_hours: bool = False
+) -> list[Lead]:
     """Leads that have never been called and are in business hours right now.
 
-    Over-fetches by 3x to leave room for business-hours filtering.
+    Over-fetches by 3x to leave room for business-hours filtering. When
+    *ignore_business_hours* is True the time-of-day gate is skipped entirely —
+    used for mock/replay seeding, where no real restaurant is dialed.
     """
     already_called_ids = [row[0] for row in session.query(CallAttempt.lead_id).distinct().all()]
     query = session.query(Lead).order_by(Lead.google_reviews_count.desc().nullslast())
     if already_called_ids:
         query = query.filter(Lead.id.notin_(already_called_ids))
     candidates: list[Lead] = query.limit(fetch_limit).all()
+    if ignore_business_hours:
+        return candidates
     return [lead for lead in candidates if is_callable_now(lead.timezone)]
 
 
@@ -102,13 +108,18 @@ def run_campaign(
     voice_provider: VoiceProvider,
     client: ClaudeClient,
     assistant_id: str,
+    ignore_business_hours: bool = False,
 ) -> CampaignResult:
     """Fire up to *limit* mystery-shop calls.
 
     For mock/replay providers the full pipeline (classify → extract → score) runs
     synchronously. For live providers, the report arrives later via webhook.
+
+    *ignore_business_hours* bypasses the 11am-2pm gate (mock/replay seeding only).
     """
-    candidates = get_callable_leads(session, fetch_limit=limit * 3)
+    candidates = get_callable_leads(
+        session, fetch_limit=limit * 3, ignore_business_hours=ignore_business_hours
+    )
 
     called = skipped_hours = skipped_queue = 0
     last_called_id: int | None = None

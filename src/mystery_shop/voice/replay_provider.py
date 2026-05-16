@@ -30,7 +30,11 @@ class ReplayProvider:
         variables: dict[str, str],
     ) -> PlacedCall:
         path = self._files[self._index % len(self._files)]
+        call_number = self._index
         self._index += 1
         data = json.loads(path.read_text())
         report = EndOfCallReport.model_validate(data)
-        return PlacedCall(vapi_call_id=f"replay-{path.stem}", report=report)
+        # Include the call sequence so every placed call gets a UNIQUE id —
+        # call_attempts.vapi_call_id is unique-constrained, and a campaign
+        # cycles these fixtures many times. The transcript content still cycles.
+        return PlacedCall(vapi_call_id=f"replay-{path.stem}-{call_number}", report=report)

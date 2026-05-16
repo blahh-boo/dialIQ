@@ -85,7 +85,10 @@ say "Resetting call data (clean slate)"
 uv run mystery-shop reset --yes
 
 say "Running campaign — ${LIMIT} ${RUN_MODE} calls"
-uv run mystery-shop campaign --limit "$LIMIT"
+# Seeding is for demo data on canned transcripts — no real restaurant is dialed,
+# so the 11am-2pm gate would only block you. The RUN_MODE guard above already
+# refuses live mode, so this flag is safe here.
+uv run mystery-shop campaign --limit "$LIMIT" --ignore-business-hours
 
 say "Writing ranked.csv"
 uv run mystery-shop export-ranked

@@ -94,7 +94,15 @@ def ingest(xlsx_path: str) -> None:
 
 
 @app.command()
-def campaign(limit: int = typer.Option(..., "--limit", help="Max calls to place")) -> None:
+def campaign(
+    limit: int = typer.Option(..., "--limit", help="Max calls to place"),
+    ignore_business_hours: bool = typer.Option(
+        False,
+        "--ignore-business-hours",
+        help="Skip the 11am-2pm local-time gate. For mock/replay seeding at any "
+        "hour — there are no real restaurants to protect. Never use in live mode.",
+    ),
+) -> None:
     """Fire up to N calls respecting business hours and interleave rules."""
     from mystery_shop.config import RunMode, get_settings
     from mystery_shop.db.session import session_scope
@@ -134,6 +142,7 @@ def campaign(limit: int = typer.Option(..., "--limit", help="Max calls to place"
             voice_provider=provider,
             client=client,
             assistant_id=assistant_id,
+            ignore_business_hours=ignore_business_hours,
         )
 
     typer.echo(
