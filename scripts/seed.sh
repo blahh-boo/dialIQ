@@ -17,7 +17,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 LIMIT="${LIMIT:-20}"
-LEADS_XLSX="${LEADS_XLSX:-Restaurant Phone Numbers - Maple Take Home Round 2.xlsx}"
+LEADS_XLSX="${LEADS_XLSX:-data.xlsx}"
 LOCK_DIR=".seed.lock"
 
 say()  { printf '\n\033[1;34m▸ %s\033[0m\n' "$1"; }
