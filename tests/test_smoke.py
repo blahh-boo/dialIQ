@@ -14,4 +14,4 @@ def test_package_has_version() -> None:
 def test_settings_load_with_defaults() -> None:
     settings = Settings()  # type: ignore[call-arg]
     assert settings.run_mode is RunMode.MOCK
-    assert settings.database_url.startswith("postgresql+psycopg://")
+    assert settings.database_url.startswith("sqlite")

@@ -30,8 +30,12 @@ class Settings(BaseSettings):
     run_mode: RunMode = RunMode.MOCK
 
     database_url: str = Field(
-        ...,
-        description="SQLAlchemy DSN, e.g. postgresql+psycopg://localhost:5432/mysteryshop",
+        default="sqlite:///maple.db",
+        description=(
+            "SQLAlchemy DSN. Default SQLite = zero-install local demo. "
+            "Production swap: set postgresql+psycopg://host/db and re-add the "
+            "psycopg dependency — no model/query code changes (dialect-portable)."
+        ),
     )
 
     anthropic_api_key: SecretStr = Field(..., description="Anthropic API key")

@@ -16,7 +16,6 @@ dependencies = [
     "pandas>=2.2,<3",
     "pgeocode==0.5.0",
     "phonenumbers>=8.13,<9",
-    "psycopg[binary]>=3.2,<4",
     "pydantic>=2.8,<3",
     "pydantic-settings>=2.5,<3",
     "python-dotenv>=1.0,<2",

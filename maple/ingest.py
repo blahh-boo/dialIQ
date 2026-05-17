@@ -18,11 +18,10 @@ import pandas as pd
 import pgeocode
 import phonenumbers
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 from timezonefinder import TimezoneFinder
 
-from maple.db import Lead
+from maple.db import Lead, upsert_insert
 
 logger = logging.getLogger(__name__)
 
@@ -351,9 +350,9 @@ def load_xlsx(path: Path, session: Session) -> IngestResult:
             continue
 
         result = session.execute(
-            pg_insert(Lead)
+            upsert_insert()(Lead)
             .values(**_lead_values(lead))
-            .on_conflict_do_nothing(constraint="uq_leads_phone_e164")
+            .on_conflict_do_nothing(index_elements=["phone_e164"])
             .returning(Lead.id)
         )
         if result.scalar_one_or_none() is not None:
