@@ -79,9 +79,11 @@ def test_rubric_version_is_set() -> None:
 # ── rings_to_answer ───────────────────────────────────────────────────────────
 
 
-def test_rings_none_deducts_3() -> None:
+def test_rings_none_no_penalty() -> None:
+    # v2 principle 1: unknown ring count is absent evidence, not a bad
+    # experience — no deduction.
     result = score_call(make_call_facts(rings_to_answer=None))
-    assert result.numeric_score == 97
+    assert result.numeric_score == 100
 
 
 def test_rings_2_no_deduction() -> None:
@@ -180,9 +182,11 @@ def test_3_repeats_deducts_25() -> None:
 # ── upsell ────────────────────────────────────────────────────────────────────
 
 
-def test_no_upsell_deducts_5() -> None:
+def test_no_upsell_no_penalty() -> None:
+    # v2 principle 4: upsell is pure upside — its absence is a normal call,
+    # never a penalty.
     result = score_call(make_call_facts(upsell_attempted=False))
-    assert result.numeric_score == 95
+    assert result.numeric_score == 100
 
 
 def test_upsell_no_deduction() -> None:
@@ -241,25 +245,30 @@ def test_hot_lead_scenario() -> None:
             hold_time_seconds=90,  # -5 -12
             transfer_count=2,  # -20
             repeated_information_count=2,  # -18
-            upsell_attempted=False,  # -5
+            upsell_attempted=False,  # 0 (v2: upsell is pure upside, no penalty)
         )
     )
-    assert result.numeric_score == 30
+    assert result.numeric_score == 35  # 100 - (10+5+12+20+18)
     assert result.tier == "HOT"
 
 
-def test_warm_lead_scenario() -> None:
-    """Minor friction: 3 rings, one brief hold, one repeat."""
+def test_mild_friction_scenario_is_cold() -> None:
+    """Minor friction: 3 rings, one brief hold, one repeat → still COLD.
+
+    Renamed from test_warm_lead_scenario: the scenario's math lands at 80,
+    which is COLD by design (≥71) — the old name contradicted its own
+    assertion. Mild, recoverable friction is correctly low-priority.
+    """
     result = score_call(
         make_call_facts(
             rings_to_answer=3,  # -5
             put_on_hold=True,
-            hold_time_seconds=20,  # -5
+            hold_time_seconds=20,  # -5 base (≤30s → no duration tier)
             repeated_information_count=1,  # -10
-            upsell_attempted=False,  # -5
+            upsell_attempted=False,  # 0 (v2: no penalty)
         )
     )
-    assert result.numeric_score == 75
+    assert result.numeric_score == 80  # 100 - (5+5+10)
     assert result.tier == "COLD"
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 
+import phonenumbers
 from sqlalchemy.orm import Session
 
 from maple.db import (
@@ -110,8 +111,14 @@ def upsert_call_attempt(
     Idempotent: if a CallAttempt with this vapi_call_id already exists, returns it unchanged.
     """
     phone = report.call.customer.number
+    if not phone:
+        logger.warning(
+            "end-of-call-report has no customer number (vapi_call_id=%s) — cannot match a lead",
+            report.call.id,
+        )
+        return None
 
-    lead: Lead | None = session.query(Lead).filter_by(phone_e164=phone).first()
+    lead = _find_lead_by_phone(session, phone)
     if lead is None:
         logger.warning("No lead found for phone %s (vapi_call_id=%s)", phone, report.call.id)
         return None
@@ -148,13 +155,40 @@ def upsert_call_attempt(
     raw_messages = [m.model_dump() for m in report.messages]
     transcript = Transcript(
         call_attempt_id=attempt.id,
-        raw_jsonb={"messages": raw_messages, "ended_reason": report.ended_reason},
+        raw_jsonb={
+            "messages": raw_messages,
+            "ended_reason": report.ended_reason,
+            # Vapi-hosted recording link (None if recording disabled). Kept in
+            # the call-artifact blob rather than a column — no schema change,
+            # works on any existing DB. A column would be the queryable choice.
+            "recording_url": report.resolved_recording_url,
+        },
         plaintext=report.transcript or "",
     )
     session.add(transcript)
     session.commit()
 
     return attempt
+
+
+def _find_lead_by_phone(session: Session, raw_number: str) -> Lead | None:
+    """Match a lead by phone, tolerant of formatting differences.
+
+    Tries an exact match first (fast path — Vapi usually echoes E.164), then
+    falls back to normalizing the incoming number to E.164 and retrying. This
+    prevents a format mismatch from silently dropping a real call.
+    """
+    lead: Lead | None = session.query(Lead).filter_by(phone_e164=raw_number).first()
+    if lead is not None:
+        return lead
+    try:
+        parsed = phonenumbers.parse(raw_number, "US")
+        e164 = phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
+    except phonenumbers.NumberParseException:
+        return None
+    if e164 == raw_number:
+        return None  # already tried this exact value
+    return session.query(Lead).filter_by(phone_e164=e164).first()
 
 
 def _build_end_of_call_report(report: VapiEndOfCallReport) -> EndOfCallReport:

@@ -139,7 +139,9 @@ def get_lead(lead_id: int) -> LeadDetailResponse:
 
         transcript = session.query(Transcript).filter_by(call_attempt_id=attempt.id).first()
         turns: list[TranscriptTurn] = []
+        recording_url: str | None = None
         if transcript and transcript.raw_jsonb:
+            recording_url = transcript.raw_jsonb.get("recording_url")
             for msg in transcript.raw_jsonb.get("messages", []):
                 role = _map_role(msg.get("role"))
                 if role is None:
@@ -152,7 +154,7 @@ def get_lead(lead_id: int) -> LeadDetailResponse:
                     )
                 )
 
-    return LeadDetailResponse(lead=lead_response, transcript=turns, recording_url=None)
+    return LeadDetailResponse(lead=lead_response, transcript=turns, recording_url=recording_url)
 
 
 def _map_role(vapi_role: Any) -> str | None:

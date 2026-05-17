@@ -21,7 +21,9 @@ from maple.llm.schemas import AnsweredBy, CallFacts, ScoreResult
 
 class VapiCustomer(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
-    number: str
+    # Optional: a failed/early-terminated call's report can omit the customer.
+    # We'd rather store the attempt with a missing number than drop it entirely.
+    number: str | None = None
 
 
 class VapiCallInner(BaseModel):
@@ -45,15 +47,33 @@ class VapiTranscriptMessage(BaseModel):
 
 
 class VapiEndOfCallReport(BaseModel):
-    """Vapi's end-of-call-report message (inner message object, not the envelope)."""
+    """Vapi's end-of-call-report message (inner message object, not the envelope).
+
+    Fields are defaulted defensively: a real sparse payload (failed call,
+    early hangup) should still validate and be stored, not silently dropped.
+    """
 
     model_config = ConfigDict(extra="ignore", frozen=True, populate_by_name=True)
 
     type: Literal["end-of-call-report"]
     call: VapiCallInner
-    ended_reason: str = Field(alias="endedReason")
+    ended_reason: str = Field(default="", alias="endedReason")
     transcript: str | None = None
     messages: list[VapiTranscriptMessage] = []
+    # Vapi hosts the recording and puts a URL in the payload. Depending on
+    # config it's at top-level `recordingUrl` or nested under `artifact`.
+    recording_url: str | None = Field(default=None, alias="recordingUrl")
+    artifact: dict[str, Any] | None = None
+
+    @property
+    def resolved_recording_url(self) -> str | None:
+        """The recording URL from whichever location Vapi used."""
+        if self.recording_url:
+            return self.recording_url
+        if self.artifact:
+            url = self.artifact.get("recordingUrl") or self.artifact.get("recording_url")
+            return url if isinstance(url, str) else None
+        return None
 
 
 class VapiStatusUpdate(BaseModel):
