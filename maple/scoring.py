@@ -9,13 +9,19 @@ Tiers:
   HOT  — pickup failed, restaurant abandoned the call, or score ≤ 40.
   WARM — score 41-70. Some friction; worth an SDR call.
   COLD — score ≥ 71. Phone experience adequate; lower priority.
+
+The rubric rationale (severity bands, why each weight, design principles) is
+documented as a block above `score_call` so it sits next to the logic it
+explains.
 """
 
 from __future__ import annotations
 
 from maple.llm.schemas import CallFacts, Deduction, ScoreResult, TierLiteral
 
-RUBRIC_VERSION = "v1"
+# v2: unknown rings and "no upsell" no longer penalize — absent evidence and a
+#     pure-upside signal are not bad experiences. See principles 1 & 4 below.
+RUBRIC_VERSION = "v2"
 
 HOT_MAX = 40
 COLD_MIN = 71
@@ -41,6 +47,31 @@ def classify_tier(
     return "WARM"
 
 
+# ── RUBRIC v2 ───────────────────────────────────────────────────────────────
+#   start at 100, subtract, floor at 0.
+#
+#   signal             condition           pts    why
+#   ------             ---------           ---    ---
+#   pickup=False       —                  → HOT   never reached = the headline
+#   abandoned          —              -30 → HOT   they hung up on a customer
+#   transfers          1 / 2 / 3+      -12/-20/-30  each one risks the order
+#   hold (base)        put on hold        -5     any hold is friction
+#   hold duration      31-60/61-120/120+s -5/-12/-20  longer = drop-off risk
+#   repeats            1 / 2 / 3+      -10/-18/-25  broken process
+#   interruptions      1-2 / 3-4 / 5+   -8/-15/-20  rushed, talked over
+#   effort (CES)       3 / 4 / 5         -8/-15/-22  felt difficulty (holistic)
+#   slow answer        3-4 / 5+ rings    -5/-10     pickup latency
+#   unknown rings      —                   0      absent evidence ≠ bad
+#   no upsell          —                   0      normal call, not a failure
+#
+#   tiers:  HOT ≤40  ·  WARM 41-70  ·  COLD ≥71
+#
+#   v2 vs v1: unknown-rings -3→0, no-upsell -5→0 (stopped penalizing non-faults).
+#   CES is additive on purpose — it captures felt effort (dead air, confusion)
+#   the discrete counts miss; a call bad on both axes should bottom out.
+# ────────────────────────────────────────────────────────────────────────────
+
+
 def score_call(facts: CallFacts) -> ScoreResult:
     """Score a single call. Returns a fully-populated `ScoreResult`."""
     if not facts.pickup:
@@ -55,9 +86,10 @@ def score_call(facts: CallFacts) -> ScoreResult:
     deductions: list[Deduction] = []
 
     # ── rings to answer ──────────────────────────────────────────────────────
+    # rings is None → unknown, not bad: no penalty (principle 1).
     rings = facts.rings_to_answer
     if rings is None:
-        deductions.append(Deduction(reason="Ring count unknown", points=3))
+        pass
     elif rings >= 5:
         deductions.append(Deduction(reason=f"Very slow to answer ({rings} rings)", points=10))
     elif rings >= 3:
@@ -107,8 +139,9 @@ def score_call(facts: CallFacts) -> ScoreResult:
         deductions.append(Deduction(reason="Had to repeat information once", points=10))
 
     # ── upsell ───────────────────────────────────────────────────────────────
-    if not facts.upsell_attempted:
-        deductions.append(Deduction(reason="No upsell attempted", points=5))
+    # Pure-upside signal (principle 4): absence is normal, never a penalty.
+    # Intentionally a no-op — kept as a labelled section so the rubric reads
+    # completely and the decision is explicit, not an omission.
 
     # ── customer effort score (1=effortless … 5=very high effort) ────────────
     ces = facts.customer_effort_score
