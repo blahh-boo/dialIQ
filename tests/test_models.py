@@ -33,7 +33,7 @@ def test_partial_unique_index_on_vapi_call_id() -> None:
     indexes = {idx.name: idx for idx in CallAttempt.__table__.indexes}
     idx = indexes["uq_call_attempts_vapi_call_id"]
     assert idx.unique is True
-    assert idx.dialect_options["postgresql"]["where"] is not None
+    assert idx.dialect_options["sqlite"]["where"] is not None
 
 
 def test_lead_phone_e164_is_unique() -> None:

@@ -41,9 +41,9 @@ def doctor() -> None:
     try:
         with session_scope() as session:
             session.execute(text("SELECT 1"))
-        ok("postgres", settings.database_url.rsplit("@", 1)[-1])
+        ok("database", settings.database_url.rsplit("@", 1)[-1])
     except Exception as exc:
-        fail("postgres", str(exc).splitlines()[0])
+        fail("database", str(exc).splitlines()[0])
         failures += 1
 
     if settings.anthropic_api_key.get_secret_value().startswith("sk-ant-"):
@@ -167,9 +167,7 @@ def campaign(
 @app.command()
 def score(call_attempt_id: int = typer.Option(..., "--call-attempt-id")) -> None:
     """Re-score an existing call attempt against the current rubric."""
-    from sqlalchemy.dialects.postgresql import insert as pg_insert
-
-    from maple.db import CallAttempt, Extraction, Score, session_scope
+    from maple.db import CallAttempt, Extraction, Score, session_scope, upsert_insert
     from maple.llm.schemas import CallFacts
     from maple.scoring import RUBRIC_VERSION, score_call
 
@@ -193,7 +191,7 @@ def score(call_attempt_id: int = typer.Option(..., "--call-attempt-id")) -> None
         result = score_call(facts)
 
         session.execute(
-            pg_insert(Score)
+            upsert_insert()(Score)
             .values(
                 extraction_id=extraction.id,
                 pickup=result.pickup,
@@ -202,7 +200,7 @@ def score(call_attempt_id: int = typer.Option(..., "--call-attempt-id")) -> None
                 rubric_version=RUBRIC_VERSION,
             )
             .on_conflict_do_update(
-                constraint="uq_scores_extraction_rubric",
+                index_elements=["extraction_id", "rubric_version"],
                 set_={
                     "pickup": result.pickup,
                     "numeric_score": result.numeric_score,
@@ -319,10 +317,13 @@ def reset(
             typer.echo("Aborted — nothing changed.")
             raise typer.Exit(1)
 
-    # One transaction. session_scope commits on success, rolls back on any error —
-    # a failure mid-truncate leaves the DB exactly as it was.
+    # One transaction. session_scope commits on success, rolls back on any
+    # error — a failure mid-delete leaves the DB exactly as it was. Explicit
+    # child-first ordering is dialect-portable (no TRUNCATE/CASCADE, which
+    # SQLite lacks) and doesn't depend on FK-cascade being enabled.
     with session_scope() as session:
-        session.execute(text("TRUNCATE TABLE call_attempts RESTART IDENTITY CASCADE"))
+        for table in ("scores", "extractions", "transcripts", "call_attempts"):
+            session.execute(text(f"DELETE FROM {table}"))  # noqa: S608
 
     typer.echo(f"Reset complete — deleted {summary}. Leads preserved.")
 

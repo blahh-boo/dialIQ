@@ -20,8 +20,7 @@ from functools import lru_cache
 from typing import Any
 
 import sqlalchemy as sa
-from sqlalchemy import Engine, ForeignKey, Index, create_engine, text
-from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
+from sqlalchemy import JSON, Engine, ForeignKey, Index, create_engine, event, text
 from sqlalchemy.orm import (
     DeclarativeBase,
     Mapped,
@@ -40,12 +39,45 @@ class Base(DeclarativeBase):
 
 @lru_cache(maxsize=1)
 def get_engine() -> Engine:
-    """Return the cached SQLAlchemy engine."""
-    return create_engine(
-        get_settings().database_url,
+    """Return the cached SQLAlchemy engine.
+
+    SQLite is the default (zero-install local demo). For SQLite we allow
+    cross-thread use (FastAPI background tasks) and turn on foreign-key
+    enforcement so ``ON DELETE CASCADE`` works for `reset`.
+    """
+    url = get_settings().database_url
+    is_sqlite = url.startswith("sqlite")
+    engine = create_engine(
+        url,
         pool_pre_ping=True,
         future=True,
+        connect_args={"check_same_thread": False} if is_sqlite else {},
     )
+
+    if is_sqlite:
+
+        @event.listens_for(engine, "connect")
+        def _enable_sqlite_fk(dbapi_conn: Any, _: Any) -> None:
+            cur = dbapi_conn.cursor()
+            cur.execute("PRAGMA foreign_keys=ON")
+            cur.close()
+
+    return engine
+
+
+def upsert_insert() -> Any:
+    """The dialect's INSERT that supports ON CONFLICT (the only construct that
+    isn't dialect-portable). Callers target conflicts with `index_elements=`
+    (column names), which is identical syntax on both dialects — so a Postgres
+    swap needs no call-site changes, only this dispatch.
+    """
+    if get_engine().dialect.name == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        return pg_insert
+    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+    return sqlite_insert
 
 
 @lru_cache(maxsize=1)
@@ -125,7 +157,7 @@ class Lead(Base):
     inferred_order_item: Mapped[str | None] = mapped_column(sa.String)
     google_reviews_count: Mapped[int | None] = mapped_column(sa.Integer)
     source_row_index: Mapped[int | None] = mapped_column(sa.Integer)
-    raw_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    raw_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
     )
@@ -191,7 +223,10 @@ class CallAttempt(Base):
             "uq_call_attempts_vapi_call_id",
             "vapi_call_id",
             unique=True,
+            # Partial unique index: idempotent webhook dedupe, but many rows
+            # legitimately have NULL vapi_call_id. Both dialects support this.
             postgresql_where=text("vapi_call_id IS NOT NULL"),
+            sqlite_where=text("vapi_call_id IS NOT NULL"),
         ),
         Index(
             "uq_call_attempts_lead_attempt",
@@ -214,19 +249,13 @@ class Transcript(Base):
         unique=True,
         nullable=False,
     )
-    raw_jsonb: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    raw_jsonb: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     plaintext: Mapped[str] = mapped_column(sa.Text, nullable=False)
-    tsv: Mapped[Any] = mapped_column(
-        TSVECTOR,
-        sa.Computed("to_tsvector('english', coalesce(plaintext, ''))", persisted=True),
-    )
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
     )
 
     call_attempt: Mapped[CallAttempt] = relationship(back_populates="transcript")
-
-    __table_args__ = (Index("ix_transcripts_tsv", "tsv", postgresql_using="gin"),)
 
 
 class Extraction(Base):
@@ -238,7 +267,7 @@ class Extraction(Base):
         ForeignKey("call_attempts.id", ondelete="CASCADE"),
         nullable=False,
     )
-    fields_jsonb: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    fields_jsonb: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     pickup: Mapped[bool] = mapped_column(sa.Boolean, nullable=False)
     answered_by: Mapped[AnsweredBy] = mapped_column(
         sa.Enum(AnsweredBy, name="answered_by", native_enum=False, length=32),
