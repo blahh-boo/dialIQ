@@ -299,12 +299,19 @@ def record_call_outcome(
     via the webhook path, which runs the same extraction pipeline there.
     """
     attempt_number = session.query(CallAttempt).filter_by(lead_id=request.lead_id).count() + 1
-    status = CallStatus.COMPLETED if placed.report else CallStatus.IN_PROGRESS
+    report = placed.report
     attempt = CallAttempt(
         lead_id=request.lead_id,
         attempt_number=attempt_number,
-        status=status,
+        status=CallStatus.COMPLETED if report else CallStatus.IN_PROGRESS,
         vapi_call_id=placed.vapi_call_id,
+        # Carry call metadata onto the row. ended_reason/duration come from the
+        # report (present for mock fixtures and real calls); started/ended only
+        # exist for real Vapi calls (None for canned fixtures, by design).
+        ended_reason=report.ended_reason if report else None,
+        duration_seconds=report.duration_seconds if report else None,
+        started_at=report.started_at if report else None,
+        ended_at=report.ended_at if report else None,
     )
     session.add(attempt)
     session.flush()

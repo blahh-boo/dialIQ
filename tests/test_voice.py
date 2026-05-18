@@ -185,6 +185,8 @@ def test_call_to_report_maps_core_fields() -> None:
     assert report.ended_reason == "customer-ended-call"
     assert report.transcript_text == "User: hi\nAI: hello"
     assert report.duration_seconds == 90  # 12:01:30 minus 12:00:00
+    assert report.started_at == datetime(2024, 6, 15, 12, 0, 0, tzinfo=UTC)
+    assert report.ended_at == datetime(2024, 6, 15, 12, 1, 30, tzinfo=UTC)
 
 
 def test_call_to_report_uses_seconds_from_start_for_time() -> None:
@@ -215,3 +217,5 @@ def test_call_to_report_handles_sparse_call() -> None:
     assert report.transcript_text == ""
     assert report.messages == ()
     assert report.duration_seconds == 0
+    assert report.started_at is None
+    assert report.ended_at is None
