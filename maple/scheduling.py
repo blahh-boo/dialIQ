@@ -8,7 +8,7 @@ testable steps, so the who/when/what rules can evolve in isolation:
 - order   — `next_lead` never dials the same restaurant twice in a row.
 - WHAT    — `resolve_order_context` decides the cuisine + item to order.
 - build   — `build_call_request` assembles the per-call Vapi payload.
-- persist — `_record_call_outcome` writes the attempt (+ pipeline for mock/replay).
+- persist — `record_call_outcome` writes the attempt (+ pipeline for mock/replay).
 """
 
 from __future__ import annotations
@@ -285,7 +285,7 @@ def _persist_extraction(
     )
 
 
-def _record_call_outcome(
+def record_call_outcome(
     request: CallRequest,
     placed: PlacedCall,
     *,
@@ -344,7 +344,7 @@ def run_campaign(
     them together and tracks counters.
 
     For mock/replay the full pipeline (classify → extract → score) runs
-    synchronously inside `_record_call_outcome`; for live it arrives via webhook.
+    synchronously inside `record_call_outcome`; for live it arrives via webhook.
 
     *ignore_business_hours* bypasses the 11am-2pm gate (mock/replay seeding only).
     *max_attempts* caps re-dials of a no-answer/busy lead (see `is_retry_eligible`).
@@ -382,7 +382,7 @@ def run_campaign(
         )
         logger.info("Placed call to lead %d — vapi_call_id=%s", lead.id, placed.vapi_call_id)
 
-        _record_call_outcome(request, placed, session=session, client=client)
+        record_call_outcome(request, placed, session=session, client=client)
 
         session.commit()
         last_called_id = lead.id

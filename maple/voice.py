@@ -9,8 +9,9 @@ later via POST /vapi/webhook.
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -122,8 +123,55 @@ class MockProvider:
         )
 
 
+def _call_to_report(call: Any) -> EndOfCallReport:
+    """Map a Vapi `Call` object (from `calls.get()`) to our `EndOfCallReport`.
+
+    Mirrors the webhook path's `_build_end_of_call_report`, but sourced from the
+    polled call object instead of the pushed payload. Defensive `getattr` keeps
+    this resilient to a sparse/early-terminated call and to SDK field drift.
+    """
+    artifact = getattr(call, "artifact", None)
+    raw_messages = getattr(artifact, "messages", None) or []
+
+    messages: list[TranscriptMessage] = []
+    for m in raw_messages:
+        text = getattr(m, "message", None)
+        role = getattr(m, "role", None)
+        if not text or not role:
+            continue  # tool-call / non-conversational turns carry no transcript text
+        messages.append(
+            TranscriptMessage(
+                role=str(role),
+                message=str(text),
+                # Vapi `time` is epoch-ms; `seconds_from_start` is what our
+                # fixtures use (small relative offsets like 4.2).
+                time=float(getattr(m, "seconds_from_start", 0.0) or 0.0),
+                duration=getattr(m, "duration", None),
+            )
+        )
+
+    started = getattr(call, "started_at", None)
+    ended = getattr(call, "ended_at", None)
+    duration = 0
+    if started and ended:
+        duration = max(0, int((ended - started).total_seconds()))
+
+    return EndOfCallReport(
+        call_id=str(getattr(call, "id", "") or ""),
+        ended_reason=str(getattr(call, "ended_reason", "") or ""),
+        transcript_text=str(getattr(artifact, "transcript", "") or ""),
+        messages=tuple(messages),
+        duration_seconds=duration,
+    )
+
+
 class VapiProvider:
-    """Initiates outbound calls via Vapi. Outcome arrives via POST /vapi/webhook."""
+    """Initiates outbound calls via Vapi.
+
+    `place_call` is fire-and-forget (webhook returns the result — the production
+    path). `place_call_and_wait` polls until the call ends and returns a fully
+    populated report — the no-public-URL path used by `mystery-shop call`.
+    """
 
     def __init__(self, *, api_key: str, phone_number_id: str) -> None:
         from vapi import Vapi  # lazy: keeps `import maple.voice` cheap for mock/CI
@@ -148,3 +196,31 @@ class VapiProvider:
             assistant_overrides=AssistantOverrides(variable_values=dict(variables)),
         )
         return PlacedCall(vapi_call_id=call.id or "", report=None)
+
+    def place_call_and_wait(
+        self,
+        *,
+        to: str,
+        assistant_id: str,
+        variables: dict[str, str],
+        poll_timeout: int = 600,
+        poll_interval: int = 5,
+    ) -> PlacedCall:
+        """Place a call, poll until it ends, and return a populated report.
+
+        Avoids the webhook entirely (no public URL / ngrok) by pulling the
+        result with `calls.get()`. Raises `TimeoutError` if the call hasn't
+        ended within *poll_timeout* seconds so a stuck call fails loudly.
+        """
+        placed = self.place_call(to=to, assistant_id=assistant_id, variables=variables)
+        deadline = time.monotonic() + poll_timeout
+        while time.monotonic() < deadline:
+            call = self._client.calls.get(placed.vapi_call_id)
+            if getattr(call, "status", None) == "ended":
+                return PlacedCall(
+                    vapi_call_id=placed.vapi_call_id, report=_call_to_report(call)
+                )
+            time.sleep(poll_interval)
+        raise TimeoutError(
+            f"Call {placed.vapi_call_id} did not end within {poll_timeout}s"
+        )
