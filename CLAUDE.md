@@ -17,18 +17,18 @@ Output for each call: structured data (not transcript dumps), including a non-ne
 
 ## Tech stack
 
-| Layer | Choice | Version pin |
-|---|---|---|
-| Language | Python | 3.11+ |
-| Web framework | FastAPI | latest |
-| Database | SQLite (default) / Postgres (DSN swap) | — |
-| ORM | SQLAlchemy | 2.0.49 |
-| Voice | Vapi (vapi-server-sdk) | 1.9.0 |
-| LLM | Anthropic SDK (`anthropic`) | 0.102.0 |
-| Validation | Pydantic | 2.x |
-| Data ingest | pandas + openpyxl | latest |
-| Tunneling | ngrok (static domain) | — |
-| Timezone | pgeocode + timezonefinder | 0.5.0 / 8.2.4 |
+| Layer         | Choice                                 | Version pin   |
+| ------------- | -------------------------------------- | ------------- |
+| Language      | Python                                 | 3.11+         |
+| Web framework | FastAPI                                | latest        |
+| Database      | SQLite (default) / Postgres (DSN swap) | —            |
+| ORM           | SQLAlchemy                             | 2.0.49        |
+| Voice         | Vapi (vapi-server-sdk)                 | 1.9.0         |
+| LLM           | Anthropic SDK (`anthropic`)          | 0.102.0       |
+| Validation    | Pydantic                               | 2.x           |
+| Data ingest   | pandas + openpyxl                      | latest        |
+| Tunneling     | ngrok (static domain)                  | —            |
+| Timezone      | pgeocode + timezonefinder              | 0.5.0 / 8.2.4 |
 
 ## Models used
 
@@ -133,6 +133,7 @@ Models + schema bootstrap in `maple/db.py` (`init_db()` — no Alembic).
 Defined as a Pydantic model in `maple/llm/schemas.py`. Non-boolean fields carry paired confidence + evidence in nested `ExtractionMetadata`. Strict tool use guarantees schema-valid output.
 
 **Scored fields** (fed directly into `rubric.py`):
+
 1. `pickup: bool` — load-bearing; always HOT if False
 2. `rings_to_answer: int | None` — from Vapi metadata
 3. `put_on_hold: bool`
@@ -145,6 +146,7 @@ Defined as a Pydantic model in `maple/llm/schemas.py`. Non-boolean fields carry 
 10. `customer_effort_score: int` — 1 (effortless) to 5 (very high effort); LLM-produced gestalt
 
 **Observation field** (SDR color, not scored):
+
 - `key_failure_quote: str | None` — verbatim quote for SDR one-liner
 
 ## Scoring rubric (deterministic Python)
@@ -152,35 +154,36 @@ Defined as a Pydantic model in `maple/llm/schemas.py`. Non-boolean fields carry 
 Pure function. Same `CallFacts` always produces the same `ScoreResult`. Rubric in `maple/scoring.py`. Score starts at 100, deductions subtracted, floored at 0. Bump `RUBRIC_VERSION` on any weight change.
 
 Tier thresholds:
+
 - **HOT:** `pickup == False` OR `call_abandoned_by_restaurant == True` OR `score ≤ 40`
 - **WARM:** `41 ≤ score ≤ 70`
 - **COLD:** `score ≥ 71`
 
 Deduction table (v2):
 
-| Signal | Condition | Points |
-|---|---|---|
-| `rings_to_answer` | unknown | 0 (absent evidence ≠ bad) |
-| | 3-4 rings | -5 |
-| | 5+ rings | -10 |
-| `put_on_hold` | True (base) | -5 |
-| `hold_time_seconds` | 31-60s | -5 |
-| | 61-120s | -12 |
-| | 121s+ | -20 |
-| `transfer_count` | 1 | -12 |
-| | 2 | -20 |
-| | 3+ | -30 |
-| `call_abandoned_by_restaurant` | True | -30 + HOT override |
-| `interruption_count` | 1-2 | -8 |
-| | 3-4 | -15 |
-| | 5+ | -20 |
-| `repeated_information_count` | 1 | -10 |
-| | 2 | -18 |
-| | 3+ | -25 |
-| `upsell_attempted` | False | 0 (normal call, not a failure) |
-| `customer_effort_score` | 3 | -8 |
-| | 4 | -15 |
-| | 5 | -22 |
+| Signal                           | Condition   | Points                         |
+| -------------------------------- | ----------- | ------------------------------ |
+| `rings_to_answer`              | unknown     | 0 (absent evidence ≠ bad)     |
+|                                  | 3-4 rings   | -5                             |
+|                                  | 5+ rings    | -10                            |
+| `put_on_hold`                  | True (base) | -5                             |
+| `hold_time_seconds`            | 31-60s      | -5                             |
+|                                  | 61-120s     | -12                            |
+|                                  | 121s+       | -20                            |
+| `transfer_count`               | 1           | -12                            |
+|                                  | 2           | -20                            |
+|                                  | 3+          | -30                            |
+| `call_abandoned_by_restaurant` | True        | -30 + HOT override             |
+| `interruption_count`           | 1-2         | -8                             |
+|                                  | 3-4         | -15                            |
+|                                  | 5+          | -20                            |
+| `repeated_information_count`   | 1           | -10                            |
+|                                  | 2           | -18                            |
+|                                  | 3+          | -25                            |
+| `upsell_attempted`             | False       | 0 (normal call, not a failure) |
+| `customer_effort_score`        | 3           | -8                             |
+|                                  | 4           | -15                            |
+|                                  | 5           | -22                            |
 
 ## Conventions
 
@@ -220,15 +223,7 @@ make campaign-live LIMIT=20
 make mock
 ```
 
-`make help` lists every target. **`make seed` is re-run-safe by construction**
-(`ingest → reset → campaign`, so every run rebuilds the identical queue) and is
-guarded against the corrupting mistakes: it refuses `RUN_MODE=live` unless
-`ALLOW_LIVE=1`, holds a lockfile so two seeds can't interleave, gates on `doctor`
-and an applied schema before writing data, and `reset` refuses `--yes` against a
-non-local DB. Defensive logic lives in `scripts/setup.sh`, `scripts/seed.sh`, and
-the `reset` CLI command — the Makefile is a thin, inspectable wrapper.
-
-### Raw CLI (what the targets wrap — for debugging)
+Raw CLI (what the targets wrap — for debugging)
 
 ```bash
 # one-time (SQLite — no createdb needed)
@@ -262,25 +257,7 @@ uv run pytest
 
 > The four `make` targets (`setup`, `seed`, `api`, `ui`) wrap these — see **Local setup commands**.
 
-## Vapi configuration (in their dashboard, just information for your awarness)
-
-Saved assistant `Takeout Order Caller` configured with:
-
-- Model: `claude-haiku-4-5`, `maxTokens: 250`
-- Voice: ElevenLabs `dN8hviqdNrAsEcL57yFj` via `eleven_turbo_v2_5`
-- Transcriber: Deepgram `flux-general-en`
-- `firstMessage`: includes recording-consent disclosure
-- `maxDurationSeconds: 240`
-- `silenceTimeoutSeconds: 30`
-- `endCallPhrases: ["I'll call you right back", "thanks bye", "gotta go"]`
-- `voicemailDetection.provider: "vapi"`, `backoffPlan.startAtSeconds: 3`
-- `backgroundSound: "office"`
-- `serverMessages: ["end-of-call-report", "status-update"]`
-- `server.url`: ngrok static domain + `/vapi/webhook`
-
-System prompt uses Liquid variables: `{{shopper_name}}`, `{{restaurant_name}}`, `{{cuisine_type}}`, `{{order_item}}`. These are injected per-call via `assistantOverrides.variableValues`.
-
-## Build order (do this in this order)
+## Build order
 
 1. **Repo scaffold + pyproject.toml + .env.example**
 2. **DB models + `init_db()`** — get `mystery-shop init-db` building the schema clean
@@ -295,7 +272,6 @@ System prompt uses Liquid variables: `{{shopper_name}}`, `{{restaurant_name}}`, 
 11. **Scheduler + business hours + retry logic**
 12. **SDR one-liner generator** — Haiku
 13. **`ranked.csv` export**
-14. **README + Loom**
 
 > **UI track (separate, later):** A frontend will be built against this backend after the pipeline is solid. Keep API endpoints clean and stably-shaped so the UI can plug in without backend rework.
 

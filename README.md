@@ -175,38 +175,6 @@ Every dimension is a **revenue-loss proxy** — a concrete reason a takeout call
 
 **`key_failure_quote`** is the one field that's purely observational (never scored). It's the verbatim line that best explains a low score — the SDR's cold-open: *"I called and your host said 'hold on' then the line went silent for two minutes."*
 
-## Cost estimate
-
-Per-call breakdown lives in [samples/cost_log.json](samples/cost_log.json).
-
-| Stage                            | Model      | Per-call (cached) |
-| -------------------------------- | ---------- | ----------------- |
-| Pre-call cuisine/order           | Sonnet 4.6 | $0.0017           |
-| Answered-by classifier           | Haiku 4.5  | $0.0004           |
-| CallFacts extractor              | Sonnet 4.6 | $0.0066           |
-| SDR one-liner                    | Haiku 4.5  | $0.0004           |
-| In-call agent + Vapi voice stack | Vapi       | ~$0.35            |
-| **Total per call**         |            | **~$0.36**  |
-
-Sample-run budget ceiling: **$20**. 20 calls projected at ~$7. Prompt caching (`cache_control: ephemeral` on system prompts) gives ~45% savings on the LLM portion at scale.
-
-## Tradeoffs and what's deliberately out of scope
-
-- **SQLite by default — zero infrastructure.** No database server to install or start. The default DSN (`sqlite:///maple.db`) creates the file on first `make setup`. Swapping to PostgreSQL is a one-line DSN change — all queries and upserts are dialect-portable through SQLAlchemy. Chosen because the reviewer rubric rewards pragmatism, and a local demo doesn't need a server process.
-- **Minimal no-answer retry.** Leads whose only call attempts ended in `NO_ANSWER` or `BUSY` are re-queued up to `MAX_CALL_ATTEMPTS` (default 2). Leads that connected to a human, voicemail, or IVR are never retried — we captured the data. In-flight live calls are excluded from re-selection until the webhook lands.
-- **Timezone resolution is state-level when zip lookup fails.** Leads with `timezone=None` are silently skipped by the scheduler. State-spanning timezones (Indiana, Kentucky) use the dominant zone — fine for a ±1h call window.
-- **Mock and replay providers are functionally identical** (both read from `samples/transcripts/`). Kept as separate `RUN_MODE` values for spec clarity: mock = ships with canned fixtures; replay = drop your own captured real transcripts in.
-- **No menu scraping.** Cuisine/order item is Haiku-inferred from restaurant name + website before each call. The hardcoded fallback (`American` / `cheeseburger and fries`) only triggers if inference fails — it is never the primary path.
-- **No repository/DDD layer.** The scheduler's composable functions (who/when/what/build/persist) satisfy "separable rules that can evolve independently" without an abstraction layer that would be over-engineering for five local tables. The seam between pure business logic and ORM queries is explicit in the naming; adding a repository class would not improve testability or extensibility at this scale.
-- **No live campaign trigger from the UI.** A web button that dials real restaurants bypasses the safety guards (`reset` refuses `--yes` off-localhost; seed refuses live without `ALLOW_LIVE=1`). Campaign control stays in the CLI intentionally — that guard is worth more than the demo convenience.
-- **`call` find-or-creates the lead; production wouldn't.** `mystery-shop call --to <number>` auto-creates a placeholder lead (labelled `Sohail_Test`) if the number isn't already in the DB. This is deliberate scope:
-  - *Why now:* a testing affordance — dial your own phone to capture a real transcript without pre-seeding data.
-  - *Why polling, not webhook:* a one-off local capture shouldn't need ngrok + a public URL + dashboard `server.url`; `calls.get()` polling delivers the same end-of-call artifact. The webhook remains the correct production path for scale.
-  - *Long-term:* add the number as a real lead first (`ingest` or explicit insert) so every call has genuine provenance — no synthetic rows leaking into the funnel/metrics.
-- **No multi-tenancy, no auth on FastAPI.** Local-first, single operator.
-- **No concurrent call rate limiting.** Sequential dispatch is fine for 2,355 leads over a few hours.
-- **Recording consent is verbal in `firstMessage`.** Some two-party states need more — documented as a known limitation.
-
 ## Data quality notes
 
 The xlsx has the anomalies you'd expect from a CRM export. The ingest handles them:
