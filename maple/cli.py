@@ -155,6 +155,7 @@ def campaign(
             client=client,
             assistant_id=assistant_id,
             ignore_business_hours=ignore_business_hours,
+            max_attempts=settings.max_call_attempts,
         )
 
     typer.echo(

@@ -44,6 +44,11 @@ Thumbs.db
 # Logs
 *.log
 
+# Local database (SQLite default — disposable, rebuilt by `make seed`)
+maple.db
+*.sqlite
+*.sqlite3
+
 # Local Postgres dumps
 *.dump
 *.sql.bak

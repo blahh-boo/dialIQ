@@ -9,6 +9,7 @@ from maple.scheduling import (
     CALL_CLOSE_HOUR,
     CALL_OPEN_HOUR,
     is_callable_at,
+    is_retry_eligible,
     next_lead,
 )
 
@@ -127,3 +128,72 @@ def test_next_lead_all_same_returns_first() -> None:
     result = next_lead(leads, last_called_id=7)  # type: ignore[arg-type]
     assert result is not None
     assert result.id == 7
+
+
+# ── is_retry_eligible policy ──────────────────────────────────────────────────
+
+
+def test_new_lead_is_eligible() -> None:
+    # No attempts yet → always callable.
+    assert (
+        is_retry_eligible(
+            attempt_count=0, has_connected=False, has_in_flight=False, max_attempts=2
+        )
+        is True
+    )
+
+
+def test_one_no_answer_under_cap_is_retried() -> None:
+    assert (
+        is_retry_eligible(
+            attempt_count=1, has_connected=False, has_in_flight=False, max_attempts=2
+        )
+        is True
+    )
+
+
+def test_exhausted_at_cap_is_not_eligible() -> None:
+    assert (
+        is_retry_eligible(
+            attempt_count=2, has_connected=False, has_in_flight=False, max_attempts=2
+        )
+        is False
+    )
+
+
+def test_over_cap_is_not_eligible() -> None:
+    assert (
+        is_retry_eligible(
+            attempt_count=3, has_connected=False, has_in_flight=False, max_attempts=2
+        )
+        is False
+    )
+
+
+def test_max_attempts_one_means_no_retry() -> None:
+    assert (
+        is_retry_eligible(
+            attempt_count=1, has_connected=False, has_in_flight=False, max_attempts=1
+        )
+        is False
+    )
+
+
+def test_connected_lead_is_never_retried() -> None:
+    # Reached a human/voicemail/IVR — data captured, even with attempts left.
+    assert (
+        is_retry_eligible(
+            attempt_count=1, has_connected=True, has_in_flight=False, max_attempts=5
+        )
+        is False
+    )
+
+
+def test_in_flight_lead_is_never_redialed() -> None:
+    # A call is mid-flight (PENDING/IN_PROGRESS) — wait for it to resolve.
+    assert (
+        is_retry_eligible(
+            attempt_count=1, has_connected=False, has_in_flight=True, max_attempts=5
+        )
+        is False
+    )

@@ -37,6 +37,14 @@ class Base(DeclarativeBase):
     """Declarative base for all ORM models."""
 
 
+# Portable big-integer key type. Renders as BIGINT on Postgres (the documented
+# production swap) but INTEGER on SQLite. SQLite only auto-increments a column
+# declared exactly `INTEGER PRIMARY KEY`; a plain `BIGINT PRIMARY KEY` is *not*
+# a rowid alias, so `id` would stay NULL on insert and every row would fail the
+# NOT NULL constraint. Used for every PK and FK so both dialects stay correct.
+BigIntKey = sa.BigInteger().with_variant(sa.Integer, "sqlite")
+
+
 @lru_cache(maxsize=1)
 def get_engine() -> Engine:
     """Return the cached SQLAlchemy engine.
@@ -115,7 +123,7 @@ def init_db() -> None:
 
     Replaces Alembic: the schema's single source of truth is the models below,
     and the local DB is disposable. To change the schema: edit a model, then
-    `dropdb mysteryshop && make setup`.
+    `rm -f maple.db && make setup` (or drop/recreate if on the Postgres swap).
     """
     Base.metadata.create_all(get_engine())
 
@@ -144,7 +152,7 @@ class Tier(StrEnum):
 class Lead(Base):
     __tablename__ = "leads"
 
-    id: Mapped[int] = mapped_column(sa.BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(BigIntKey, primary_key=True)
     restaurant_name: Mapped[str] = mapped_column(sa.String, nullable=False)
     phone_e164: Mapped[str] = mapped_column(sa.String(20), unique=True, nullable=False)
     website: Mapped[str | None] = mapped_column(sa.String)
@@ -181,9 +189,9 @@ class Lead(Base):
 class CallAttempt(Base):
     __tablename__ = "call_attempts"
 
-    id: Mapped[int] = mapped_column(sa.BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(BigIntKey, primary_key=True)
     lead_id: Mapped[int] = mapped_column(
-        sa.BigInteger,
+        BigIntKey,
         ForeignKey("leads.id", ondelete="CASCADE"),
         nullable=False,
     )
@@ -242,9 +250,9 @@ class CallAttempt(Base):
 class Transcript(Base):
     __tablename__ = "transcripts"
 
-    id: Mapped[int] = mapped_column(sa.BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(BigIntKey, primary_key=True)
     call_attempt_id: Mapped[int] = mapped_column(
-        sa.BigInteger,
+        BigIntKey,
         ForeignKey("call_attempts.id", ondelete="CASCADE"),
         unique=True,
         nullable=False,
@@ -261,9 +269,9 @@ class Transcript(Base):
 class Extraction(Base):
     __tablename__ = "extractions"
 
-    id: Mapped[int] = mapped_column(sa.BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(BigIntKey, primary_key=True)
     call_attempt_id: Mapped[int] = mapped_column(
-        sa.BigInteger,
+        BigIntKey,
         ForeignKey("call_attempts.id", ondelete="CASCADE"),
         nullable=False,
     )
@@ -300,9 +308,9 @@ class Extraction(Base):
 class Score(Base):
     __tablename__ = "scores"
 
-    id: Mapped[int] = mapped_column(sa.BigInteger, primary_key=True)
+    id: Mapped[int] = mapped_column(BigIntKey, primary_key=True)
     extraction_id: Mapped[int] = mapped_column(
-        sa.BigInteger,
+        BigIntKey,
         ForeignKey("extractions.id", ondelete="CASCADE"),
         nullable=False,
     )

@@ -1,8 +1,14 @@
-"""Campaign scheduling: business-hours gate, interleave, and the campaign loop.
+"""Campaign scheduling: small composable steps + a thin campaign loop.
 
-- `is_callable_now` / `is_callable_at` — only dial during 11am-2pm local time.
-- `next_lead` — never call the same restaurant twice in a row.
-- `run_campaign` — pick eligible leads, place calls, run the pipeline, persist.
+`run_campaign` is deliberately a thin orchestrator over named, independently
+testable steps, so the who/when/what rules can evolve in isolation:
+
+- WHO     — `get_callable_leads` selects eligible leads.
+- WHEN    — `is_callable_now` / `is_callable_at` gate to 11am-2pm local time.
+- order   — `next_lead` never dials the same restaurant twice in a row.
+- WHAT    — `resolve_order_context` decides the cuisine + item to order.
+- build   — `build_call_request` assembles the per-call Vapi payload.
+- persist — `_record_call_outcome` writes the attempt (+ pipeline for mock/replay).
 """
 
 from __future__ import annotations
@@ -30,11 +36,13 @@ from maple.llm.client import ClaudeClient
 from maple.llm.extractor import EXTRACTOR_MODEL, EXTRACTOR_PROMPT_VERSION, extract_call_facts
 from maple.llm.passes import classify_answered_by, generate_one_liner, infer_cuisine_and_order
 from maple.scoring import RUBRIC_VERSION, score_call
-from maple.voice import EndOfCallReport, VoiceProvider
+from maple.voice import EndOfCallReport, PlacedCall, VoiceProvider
 
 logger = logging.getLogger(__name__)
 
 _SHOPPER_NAME = "Alex"
+_INFERENCE_FALLBACK_CUISINE = "American"
+_INFERENCE_FALLBACK_ORDER_ITEM = "cheeseburger and fries"
 
 # ── Business hours ──────────────────────────────────────────────────────────
 # Call window: 11:00 AM - 2:00 PM local time (restaurant's timezone).
@@ -82,6 +90,67 @@ def next_lead(candidates: list[Lead], *, last_called_id: int | None) -> Lead | N
     return candidates[0]
 
 
+# ── What to order ───────────────────────────────────────────────────────────
+def resolve_order_context(lead: Lead, *, client: ClaudeClient) -> tuple[str, str]:
+    """Decide *what* to order for this lead: `(cuisine_type, order_item)`.
+
+    Reuses the lead's stored values if already inferred; otherwise infers once
+    via Haiku and writes the result back onto the lead (the caller's session
+    persists it on flush/commit). If inference fails the lead's fields are left
+    untouched — so a later attempt can retry — and a safe default is returned so
+    a call is never blocked on inference.
+    """
+    if lead.cuisine_type and lead.inferred_order_item:
+        return lead.cuisine_type, lead.inferred_order_item
+    try:
+        precall = infer_cuisine_and_order(
+            restaurant_name=lead.restaurant_name,
+            website=lead.website,
+            client=client,
+        )
+    except Exception:
+        logger.warning("Pre-call inference failed for lead %d", lead.id)
+        return (
+            lead.cuisine_type or _INFERENCE_FALLBACK_CUISINE,
+            lead.inferred_order_item or _INFERENCE_FALLBACK_ORDER_ITEM,
+        )
+    lead.cuisine_type = precall.cuisine_type
+    lead.inferred_order_item = precall.order_item
+    return precall.cuisine_type, precall.order_item
+
+
+# ── Call request assembly ───────────────────────────────────────────────────
+@dataclass(frozen=True)
+class CallRequest:
+    """Everything the voice provider needs for one call.
+
+    'What to order' is resolved upstream and frozen here, so call placement is
+    pure I/O — no business logic leaks into the provider boundary.
+    """
+
+    lead_id: int
+    to: str
+    assistant_id: str
+    variables: dict[str, str]
+
+
+def build_call_request(
+    lead: Lead, *, cuisine_type: str, order_item: str, assistant_id: str
+) -> CallRequest:
+    """Assemble the per-call Vapi `variableValues` payload for *lead*."""
+    return CallRequest(
+        lead_id=lead.id,
+        to=lead.phone_e164,
+        assistant_id=assistant_id,
+        variables={
+            "shopper_name": _SHOPPER_NAME,
+            "restaurant_name": lead.restaurant_name,
+            "cuisine_type": cuisine_type or _INFERENCE_FALLBACK_CUISINE,
+            "order_item": order_item or _INFERENCE_FALLBACK_ORDER_ITEM,
+        },
+    )
+
+
 # ── Campaign loop ───────────────────────────────────────────────────────────
 @dataclass(frozen=True)
 class CampaignResult:
@@ -90,19 +159,85 @@ class CampaignResult:
     skipped_queue: int  # leads skipped — interleave or exhausted queue
 
 
-def get_callable_leads(
-    session: Session, *, fetch_limit: int, ignore_business_hours: bool = False
-) -> list[Lead]:
-    """Leads that have never been called and are in business hours right now.
+# A call "connected" — we reached someone/something and captured usable data —
+# if its extraction classified the line as a human, voicemail, or IVR. Only
+# NO_ANSWER / BUSY produce no data and are worth re-dialing.
+_CONNECTED_OUTCOMES = (DBAnsweredBy.HUMAN, DBAnsweredBy.VOICEMAIL, DBAnsweredBy.IVR)
 
-    Over-fetches by 3x to leave room for business-hours filtering. When
-    *ignore_business_hours* is True the time-of-day gate is skipped entirely —
-    used for mock/replay seeding, where no real restaurant is dialed.
+# Default dial attempts per lead before giving up (1 = no retry). The live value
+# flows from Settings.max_call_attempts via the CLI; this is the direct-call
+# fallback for tests / REPL use.
+DEFAULT_MAX_CALL_ATTEMPTS = 2
+
+
+def is_retry_eligible(
+    *, attempt_count: int, has_connected: bool, has_in_flight: bool, max_attempts: int
+) -> bool:
+    """Pure policy: may this lead be (re)dialed, given its call history?
+
+    - A new lead (no attempts) is always eligible.
+    - A lead with a call mid-flight (PENDING/IN_PROGRESS) is never re-dialed —
+      we wait for it to resolve (for live, the webhook will land the result).
+    - A lead that already connected (reached a human/voicemail/IVR) is done —
+      the data is captured and re-dialing a real restaurant would be rude.
+    - Otherwise (only no-answer/busy/failed attempts) it stays eligible until
+      it has used up *max_attempts*.
+
+    Kept pure (no DB) so the callable rules can evolve and be unit-tested in
+    isolation from the query that assembles its inputs.
     """
-    already_called_ids = [row[0] for row in session.query(CallAttempt.lead_id).distinct().all()]
+    if has_in_flight or has_connected:
+        return False
+    return attempt_count < max_attempts
+
+
+def get_callable_leads(
+    session: Session,
+    *,
+    fetch_limit: int,
+    ignore_business_hours: bool = False,
+    max_attempts: int = DEFAULT_MAX_CALL_ATTEMPTS,
+) -> list[Lead]:
+    """Leads eligible to dial now: never-called, or a retryable no-answer/busy
+    still under the attempt cap, and (unless *ignore_business_hours*) inside the
+    11am-2pm local window.
+
+    Over-fetches by 3x to leave room for the business-hours filter. The per-lead
+    decision is delegated to `is_retry_eligible` so the policy stays pure; this
+    function only assembles its inputs from the call history.
+    """
+    counts: dict[int, int] = {}
+    in_flight: set[int] = set()
+    for row in session.query(CallAttempt.lead_id, CallAttempt.status):
+        lead_id = row[0]
+        counts[lead_id] = counts.get(lead_id, 0) + 1
+        if row[1] in (CallStatus.PENDING, CallStatus.IN_PROGRESS):
+            in_flight.add(lead_id)
+
+    connected: set[int] = {
+        row[0]
+        for row in (
+            session.query(CallAttempt.lead_id)
+            .join(Extraction, Extraction.call_attempt_id == CallAttempt.id)
+            .filter(Extraction.answered_by.in_(_CONNECTED_OUTCOMES))
+            .distinct()
+        )
+    }
+
+    excluded = {
+        lead_id
+        for lead_id, n in counts.items()
+        if not is_retry_eligible(
+            attempt_count=n,
+            has_connected=lead_id in connected,
+            has_in_flight=lead_id in in_flight,
+            max_attempts=max_attempts,
+        )
+    }
+
     query = session.query(Lead).order_by(Lead.google_reviews_count.desc().nullslast())
-    if already_called_ids:
-        query = query.filter(Lead.id.notin_(already_called_ids))
+    if excluded:
+        query = query.filter(Lead.id.notin_(excluded))
     candidates: list[Lead] = query.limit(fetch_limit).all()
     if ignore_business_hours:
         return candidates
@@ -150,6 +285,48 @@ def _persist_extraction(
     )
 
 
+def _record_call_outcome(
+    request: CallRequest,
+    placed: PlacedCall,
+    *,
+    session: Session,
+    client: ClaudeClient,
+) -> None:
+    """Persist the `call_attempts` row and, for mock/replay, the transcript +
+    extraction pipeline.
+
+    For live providers `placed.report` is None now — the report arrives later
+    via the webhook path, which runs the same extraction pipeline there.
+    """
+    attempt_number = session.query(CallAttempt).filter_by(lead_id=request.lead_id).count() + 1
+    status = CallStatus.COMPLETED if placed.report else CallStatus.IN_PROGRESS
+    attempt = CallAttempt(
+        lead_id=request.lead_id,
+        attempt_number=attempt_number,
+        status=status,
+        vapi_call_id=placed.vapi_call_id,
+    )
+    session.add(attempt)
+    session.flush()
+
+    if placed.report is None:
+        return
+
+    raw_msgs: list[dict[str, Any]] = [m.model_dump() for m in placed.report.messages]
+    session.add(
+        Transcript(
+            call_attempt_id=attempt.id,
+            raw_jsonb={"messages": raw_msgs, "ended_reason": placed.report.ended_reason},
+            plaintext=placed.report.transcript_text,
+        )
+    )
+    session.flush()
+    try:
+        _persist_extraction(placed.report, attempt.id, session=session, client=client)
+    except Exception:
+        logger.exception("Extraction failed for call_attempt %d", attempt.id)
+
+
 def run_campaign(
     *,
     limit: int,
@@ -158,19 +335,28 @@ def run_campaign(
     client: ClaudeClient,
     assistant_id: str,
     ignore_business_hours: bool = False,
+    max_attempts: int = DEFAULT_MAX_CALL_ATTEMPTS,
 ) -> CampaignResult:
     """Fire up to *limit* mystery-shop calls.
 
-    For mock/replay providers the full pipeline (classify → extract → score) runs
-    synchronously. For live providers, the report arrives later via webhook.
+    A thin orchestrator: select → interleave → resolve order → build request →
+    place → record. Each step is a named function above; this loop only wires
+    them together and tracks counters.
+
+    For mock/replay the full pipeline (classify → extract → score) runs
+    synchronously inside `_record_call_outcome`; for live it arrives via webhook.
 
     *ignore_business_hours* bypasses the 11am-2pm gate (mock/replay seeding only).
+    *max_attempts* caps re-dials of a no-answer/busy lead (see `is_retry_eligible`).
     """
     candidates = get_callable_leads(
-        session, fetch_limit=limit * 3, ignore_business_hours=ignore_business_hours
+        session,
+        fetch_limit=limit * 3,
+        ignore_business_hours=ignore_business_hours,
+        max_attempts=max_attempts,
     )
 
-    called = skipped_hours = skipped_queue = 0
+    called = 0
     last_called_id: int | None = None
     remaining = list(candidates)
 
@@ -180,68 +366,26 @@ def run_campaign(
             break
         remaining.remove(lead)
 
-        # Pre-call inference: update lead's cuisine + order_item if not set
-        cuisine_type = lead.cuisine_type
-        order_item = lead.inferred_order_item
-        if not cuisine_type or not order_item:
-            try:
-                precall = infer_cuisine_and_order(
-                    restaurant_name=lead.restaurant_name,
-                    website=lead.website,
-                    client=client,
-                )
-                cuisine_type = precall.cuisine_type
-                order_item = precall.order_item
-                lead.cuisine_type = cuisine_type
-                lead.inferred_order_item = order_item
-                session.flush()
-            except Exception:
-                logger.warning("Pre-call inference failed for lead %d", lead.id)
-                cuisine_type = cuisine_type or "American"
-                order_item = order_item or "cheeseburger and fries"
+        cuisine_type, order_item = resolve_order_context(lead, client=client)
+        session.flush()  # persist any newly-inferred cuisine before the call
 
-        variables: dict[str, str] = {
-            "shopper_name": _SHOPPER_NAME,
-            "restaurant_name": lead.restaurant_name,
-            "cuisine_type": cuisine_type or "American",
-            "order_item": order_item or "cheeseburger and fries",
-        }
-
-        placed = voice_provider.place_call(
-            to=lead.phone_e164,
+        request = build_call_request(
+            lead,
+            cuisine_type=cuisine_type,
+            order_item=order_item,
             assistant_id=assistant_id,
-            variables=variables,
+        )
+        placed = voice_provider.place_call(
+            to=request.to,
+            assistant_id=request.assistant_id,
+            variables=request.variables,
         )
         logger.info("Placed call to lead %d — vapi_call_id=%s", lead.id, placed.vapi_call_id)
 
-        attempt_number = session.query(CallAttempt).filter_by(lead_id=lead.id).count() + 1
-        status = CallStatus.COMPLETED if placed.report else CallStatus.IN_PROGRESS
-        attempt = CallAttempt(
-            lead_id=lead.id,
-            attempt_number=attempt_number,
-            status=status,
-            vapi_call_id=placed.vapi_call_id,
-        )
-        session.add(attempt)
-        session.flush()
-
-        if placed.report is not None:
-            raw_msgs: list[dict[str, Any]] = [m.model_dump() for m in placed.report.messages]
-            session.add(
-                Transcript(
-                    call_attempt_id=attempt.id,
-                    raw_jsonb={"messages": raw_msgs, "ended_reason": placed.report.ended_reason},
-                    plaintext=placed.report.transcript_text,
-                )
-            )
-            session.flush()
-            try:
-                _persist_extraction(placed.report, attempt.id, session=session, client=client)
-            except Exception:
-                logger.exception("Extraction failed for call_attempt %d", attempt.id)
+        _record_call_outcome(request, placed, session=session, client=client)
 
         session.commit()
         last_called_id = lead.id
         called += 1
 
-    return CampaignResult(called=called, skipped_hours=skipped_hours, skipped_queue=skipped_queue)
+    return CampaignResult(called=called, skipped_hours=0, skipped_queue=0)

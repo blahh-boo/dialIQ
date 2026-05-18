@@ -4,6 +4,16 @@ Automated phone-based mystery shopping for restaurant leads. Places a takeout-or
 
 The output for each restaurant is structured data — not a transcript dump — including a non-negotiable `pickup: bool`, a 0-100 numeric score, a HOT/WARM/COLD tier, and a one-line SDR brief.
 
+## Services
+
+| Service | What it does |
+|---|---|
+| **Lead ingest** | Reads an xlsx export, normalises phones to E.164, infers timezone from zip/state, deduplicates, and loads into `leads`. |
+| **Campaign orchestrator** | Selects eligible leads (business hours, never-called or retryable no-answer), infers what to order per restaurant via Haiku, and dispatches calls through the voice provider. |
+| **Extraction pipeline** | After each call: classifies who answered (Haiku), extracts 10 structured facts from the transcript (Sonnet strict tool use), and scores them deterministically (pure Python). |
+| **SDR export** | Writes `ranked.csv` sorted HOT → WARM → COLD, worst score first — the one file an SDR needs. |
+| **Cockpit API** | FastAPI endpoints the frontend reads; also receives and processes Vapi end-of-call webhooks. |
+
 ## Architecture
 
 ```
@@ -37,11 +47,11 @@ Five tables: `leads`, `call_attempts`, `transcripts`, `extractions`, `scores`. M
 
 ```bash
 # 0. one-time install + secrets (only the very first time)
-brew install postgresql ngrok uv
+brew install ngrok uv          # no database server needed — SQLite is the default
 uv sync && npm --prefix frontend install
 cp .env.example .env          # then put your real ANTHROPIC_API_KEY in .env
 
-# 1. provision the machine — checks Postgres, creates the DB, migrates, health-checks
+# 1. create the schema and verify your setup (SQLite file created automatically)
 make setup
 
 # 2. load a deterministic demo dataset — safe to re-run
@@ -74,7 +84,7 @@ fully recovers on the next `make seed`. Protections built into `make seed`:
 
 | `make` target | Equivalent manual commands |
 |---|---|
-| `make setup`  | `pg_isready` → `createdb mysteryshop` → `uv run mystery-shop init-db` → `uv run mystery-shop doctor` |
+| `make setup`  | `uv run mystery-shop init-db` → `uv run mystery-shop doctor` |
 | `make seed`   | `ingest data.xlsx` → `mystery-shop reset --yes` → `campaign --limit 20 --ignore-business-hours` → `export-ranked` |
 | `make api`    | `uv run uvicorn maple.web.app:app --reload` |
 | `make ui`     | `npm --prefix frontend run dev` |
@@ -114,7 +124,7 @@ Live mode requires the four `VAPI_*` env vars (enforced by config validator).
 
 ## The 10 CallFacts (extraction shape)
 
-Defined in [maple/llm/schemas.py](maple/llm/schemas.py). Strict tool use guarantees schema-valid output. Per-field confidence + evidence live in nested `ExtractionMetadata`.
+Defined in [maple/llm/schemas.py](maple/llm/schemas.py). Sonnet's strict tool-use call guarantees schema-valid output on every extraction — no post-hoc parsing or fallback guessing. Each non-boolean field carries a nested `ExtractionMetadata` with a `confidence` float (0–1) and a verbatim `evidence` quote from the transcript, so every fact is auditable back to the words that produced it.
 
 **Scored** (fed into [maple/scoring.py](maple/scoring.py)):
 
@@ -135,9 +145,31 @@ Defined in [maple/llm/schemas.py](maple/llm/schemas.py). Strict tool use guarant
 
 ## Scoring rubric
 
-Pure Python — same `CallFacts` always produces the same `ScoreResult`. Score starts at 100, deductions subtracted, floored at 0. `RUBRIC_VERSION` is stored on every score row for auditability; bump it on any weight change. Full deduction table is in [CLAUDE.md](CLAUDE.md).
+Pure Python — same `CallFacts` always produces the same `ScoreResult`. Score starts at 100, deductions subtracted, floored at 0. `RUBRIC_VERSION` is stamped on every score row; bump it on any weight change so every historical score is auditable to the exact rubric that produced it.
 
-Tier thresholds: **HOT** = no pickup OR abandoned OR `score ≤ 40` · **WARM** = `41-70` · **COLD** = `≥ 71`.
+Tier thresholds: **HOT** = no pickup OR abandoned OR `score ≤ 40` · **WARM** = `41-70` · **COLD** = `≥ 71`
+
+### Why these signals and not others
+
+Every dimension is a **revenue-loss proxy** — a concrete reason a takeout caller would hang up or not order again. That's the product being sold: "your phone experience is costing you orders."
+
+| Signal | Why it's here | Points |
+|---|---|---|
+| `pickup == False` | 100% lost order — the headline finding | → HOT, score 0 |
+| `call_abandoned_by_restaurant` | They hung up on a customer mid-call | -30 → HOT override |
+| `transfer_count` 1/2/3+ | Each transfer risks losing the caller; 3+ is a broken process | -12/-20/-30 |
+| `put_on_hold` + `hold_time_seconds` | Any hold is friction; duration compounds it | -5 base, -5/-12/-20 |
+| `repeated_information_count` | Customer had to repeat themselves — broken handoff | -10/-18/-25 |
+| `interruption_count` | Caller was rushed or talked over | -8/-15/-20 |
+| `customer_effort_score` (1–5) | Holistic felt difficulty; captures dead air and confusion the discrete counts miss | -8/-15/-22 |
+| `rings_to_answer` | Pickup latency — slow answer loses impatient callers | -5/-10 (unknown = 0) |
+| `upsell_attempted` | Positive signal — absence is normal, never a penalty | 0 |
+
+**Why only friction signals?** Re-dialing a restaurant to evaluate politeness or friendliness is not the SDR's job. The rubric targets what causes order drop-off — that's directly actionable. Scoring "warmth" would add noise without changing what an SDR does in 5 seconds.
+
+**On `customer_effort_score`:** This is an LLM-produced *observation* (how hard did the caller have to work?), not a score. The scorer's role is to weight it consistently. CES deliberately compounds with the discrete counts — a call that scores badly on both axes should bottom out, because the customer experience was genuinely bad on multiple dimensions. That compounding is intentional, not double-counting.
+
+**`key_failure_quote`** is the one field that's purely observational (never scored). It's the verbatim line that best explains a low score — the SDR's cold-open: *"I called and your host said 'hold on' then the line went silent for two minutes."*
 
 ## Cost estimate
 
@@ -156,10 +188,13 @@ Sample-run budget ceiling: **$20**. 20 calls projected at ~$7. Prompt caching (`
 
 ## Tradeoffs and what's deliberately out of scope
 
+- **SQLite by default — zero infrastructure.** No database server to install or start. The default DSN (`sqlite:///maple.db`) creates the file on first `make setup`. Swapping to PostgreSQL is a one-line DSN change — all queries and upserts are dialect-portable through SQLAlchemy. Chosen because the reviewer rubric rewards pragmatism, and a local demo doesn't need a server process.
+- **Minimal no-answer retry.** Leads whose only call attempts ended in `NO_ANSWER` or `BUSY` are re-queued up to `MAX_CALL_ATTEMPTS` (default 2). Leads that connected to a human, voicemail, or IVR are never retried — we captured the data. In-flight live calls are excluded from re-selection until the webhook lands.
 - **Timezone resolution is state-level when zip lookup fails.** Leads with `timezone=None` are silently skipped by the scheduler. State-spanning timezones (Indiana, Kentucky) use the dominant zone — fine for a ±1h call window.
-- **One call per restaurant.** Retry logic isn't ours — Vapi handles voicemail backoff. Re-attempts would just rerun `ingest` after clearing `call_attempts`.
-- **Mock and replay providers are functionally identical** (both read from `samples/transcripts/`). Kept as separate `RUN_MODE` values for spec clarity: mock = ships with canned fixtures; replay = drop your own captured transcripts in.
-- **No menu scraping.** Cuisine/order item is LLM-inferred from name + website. Documented limitation.
+- **Mock and replay providers are functionally identical** (both read from `samples/transcripts/`). Kept as separate `RUN_MODE` values for spec clarity: mock = ships with canned fixtures; replay = drop your own captured real transcripts in.
+- **No menu scraping.** Cuisine/order item is Haiku-inferred from restaurant name + website before each call. The hardcoded fallback (`American` / `cheeseburger and fries`) only triggers if inference fails — it is never the primary path.
+- **No repository/DDD layer.** The scheduler's composable functions (who/when/what/build/persist) satisfy "separable rules that can evolve independently" without an abstraction layer that would be over-engineering for five local tables. The seam between pure business logic and ORM queries is explicit in the naming; adding a repository class would not improve testability or extensibility at this scale.
+- **No live campaign trigger from the UI.** A web button that dials real restaurants bypasses the safety guards (`reset` refuses `--yes` off-localhost; seed refuses live without `ALLOW_LIVE=1`). Campaign control stays in the CLI intentionally — that guard is worth more than the demo convenience.
 - **No multi-tenancy, no auth on FastAPI.** Local-first, single operator.
 - **No concurrent call rate limiting.** Sequential dispatch is fine for 2,355 leads over a few hours.
 - **Recording consent is verbal in `firstMessage`.** Some two-party states need more — documented as a known limitation.
@@ -179,11 +214,11 @@ See [explore_leads.ipynb](explore_leads.ipynb) for the visual walkthrough.
 
 ```bash
 uv run ruff check && uv run ruff format --check
-uv run mypy src
+uv run mypy maple
 uv run pytest
 ```
 
-167 tests across 9 files. Zero infrastructure dependency — no DB, no network. Mock voice provider + canned transcripts cover the full pipeline.
+177 tests across 10 files. No network dependency — the LLM and voice providers are mocked. A DB-insert smoke test (`test_db_schema.py`) exercises the schema + FK chain on in-memory SQLite so dialect bugs fail in CI; the rest is pure-unit.
 
 ## Project layout
 
@@ -210,7 +245,7 @@ maple/
     └── models.py     # Vapi payload models + cockpit API response schemas
 ```
 
-Schema changes: edit a model in `db.py`, then `dropdb mysteryshop && make setup`.
+Schema changes: edit a model in `db.py`, then `rm -f maple.db && make setup`.
 The DB is disposable and local — `make seed` rebuilds it deterministically.
 
 ## Operations
@@ -221,40 +256,40 @@ inspecting the database directly.
 
 | Component | Check | Healthy output |
 |---|---|---|
-| **Postgres server** | `pg_isready -h localhost -p 5432` | `localhost:5432 - accepting connections` |
-| **Database + schema + key** | `uv run mystery-shop doctor` | three `[OK]` lines |
+| **Database + schema + key** | `uv run mystery-shop doctor` | `[OK]` lines for env, database, anthropic key |
 | **Backend API** | `curl -s localhost:8000/health` | `{"status":"ok"}` |
 | **Backend has data** | `curl -s localhost:8000/api/campaign/stats` | JSON with `mystery_shopped > 0` |
 | **Frontend** | open `http://localhost:5173` | the cockpit renders |
 | **Which run mode** | `grep '^RUN_MODE=' .env` | `mock` / `replay` / `live` |
-| **Postgres background service** | `brew services list \| grep postgres` | `started` |
+| **Which database** | `grep '^DATABASE_URL=' .env` | SQLite path or postgres DSN |
 
 If `doctor` is green but the queue is empty, the DB is live but unseeded — run `make seed`.
 
 ## Inspecting the database
 
-Open a SQL shell on the project DB:
+Open a SQL shell (SQLite default):
 
 ```bash
-psql mysteryshop
+sqlite3 maple.db
 ```
 
-Useful `psql` meta-commands (inside the shell):
+Useful commands inside the shell:
 
 | Command | Shows |
 |---|---|
-| `\dt` | all tables |
-| `\d leads` | the `leads` table's columns + indexes |
-| `\d+ scores` | same, with extra detail |
-| `\x` | toggle expanded (row-per-line) display — good for wide rows |
-| `\q` | quit |
+| `.tables` | all tables |
+| `.schema leads` | the `leads` table's columns + indexes |
+| `.mode column` + `.headers on` | readable column output |
+| `.quit` | exit |
 
 One-liners without entering the shell:
 
 ```bash
-psql mysteryshop -c "SELECT count(*) FROM leads;"
-psql mysteryshop -c "SELECT tier, count(*) FROM scores GROUP BY tier;"
+sqlite3 maple.db "SELECT count(*) FROM leads;"
+sqlite3 maple.db "SELECT tier, count(*) FROM scores GROUP BY tier;"
 ```
+
+If you've swapped to PostgreSQL (`DATABASE_URL=postgresql+psycopg://...`), replace `sqlite3 maple.db` with `psql <your-db-name>`.
 
 ## The 5 tables and what fills them
 
@@ -286,7 +321,7 @@ FROM scores s
 JOIN extractions e ON e.id = s.extraction_id
 JOIN call_attempts c ON c.id = e.call_attempt_id
 JOIN leads l ON l.id = c.lead_id
-ORDER BY array_position(ARRAY['HOT','WARM','COLD']::text[], s.tier::text),
+ORDER BY CASE s.tier WHEN 'HOT' THEN 1 WHEN 'WARM' THEN 2 ELSE 3 END,
          s.numeric_score ASC
 LIMIT 20;
 
@@ -305,7 +340,7 @@ WHERE s.pickup = false;
 |---|---|
 | Wipe call data, keep leads (interactive confirm) | `make reset` |
 | Wipe + reload deterministic demo data | `make seed` (does reset → campaign internally) |
-| Nuke the whole DB and start over | `dropdb mysteryshop && make setup && make seed` |
+| Nuke the whole DB and start over | `rm -f maple.db && make setup && make seed` |
 
 `make seed` is re-run-safe by construction — running it again always yields the
 identical queue (it resets call data before re-running the campaign).

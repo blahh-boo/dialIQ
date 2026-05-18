@@ -9,7 +9,7 @@ help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 	  | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[1;36m%-8s\033[0m %s\n", $$1, $$2}'
 
-setup:  ## One-time: check Postgres, create DB, migrate, health-check
+setup:  ## One-time: create schema (SQLite by default) + health-check
 	@bash scripts/setup.sh
 
 seed:  ## Deterministic demo data (ingest → reset → campaign). Re-run-safe.
