@@ -283,21 +283,4 @@ uv run pytest
 - Concurrent call rate limiting (sequential is fine for 2,355 leads over a few hours)
 - A/B testing different shopper personas (mention as "with more time")
 
-## Open questions / things to confirm with reviewer
-
-- Recording consent: verbal disclosure in `firstMessage` is the chosen approach. Some 2-party states may need more. Documented as a known limitation.
-- Real-restaurant ethics: bail script handles food waste; max 1 call per number to avoid annoyance.
-- Cost ceiling for the sample run: targeting <$20 in API spend total.
-
-## Reviewer evaluation rubric (memorize this)
-
-The take-home will be scored on:
-
-1. **System design** — clean architecture, components separated (call placement, extraction, storage, scheduling)
-2. **Call orchestration** — realistic agent, retry logic, timezone handling, edge cases (no-answer, voicemail, busy)
-3. **Data extraction** — reliable transcript→fields, handles ambiguity, extraction separated from scoring
-4. **Code quality** — readable, error handling, not over- or under-engineered, config separate from logic
-5. **Pragmatism** — built what matters, mocked the right things, acknowledged what's missing
-6. **README quality** — understandable without reading all code, tradeoffs articulated, cost estimate included
-
 Every design decision should be defensible against one of these dimensions.

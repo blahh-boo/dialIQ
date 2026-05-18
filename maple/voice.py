@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
@@ -41,6 +42,11 @@ class EndOfCallReport(BaseModel):
     transcript_text: str
     messages: tuple[TranscriptMessage, ...]
     duration_seconds: int = Field(..., ge=0)
+    # Wall-clock call boundaries. Only real Vapi calls carry these; canned
+    # fixtures legitimately omit them (no real call happened), so they default
+    # to None rather than being fabricated.
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
 
 
 class PlacedCall(BaseModel):
@@ -162,6 +168,8 @@ def _call_to_report(call: Any) -> EndOfCallReport:
         transcript_text=str(getattr(artifact, "transcript", "") or ""),
         messages=tuple(messages),
         duration_seconds=duration,
+        started_at=started,
+        ended_at=ended,
     )
 
 

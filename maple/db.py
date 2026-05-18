@@ -14,7 +14,6 @@ from __future__ import annotations
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime
-from decimal import Decimal
 from enum import StrEnum
 from functools import lru_cache
 from typing import Any
@@ -207,11 +206,9 @@ class CallAttempt(Base):
     )
     vapi_call_id: Mapped[str | None] = mapped_column(sa.String)
     ended_reason: Mapped[str | None] = mapped_column(sa.String)
-    shopper_name: Mapped[str | None] = mapped_column(sa.String)
     started_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
     ended_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
     duration_seconds: Mapped[int | None] = mapped_column(sa.Integer)
-    error_message: Mapped[str | None] = mapped_column(sa.Text)
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
     )
@@ -287,9 +284,6 @@ class Extraction(Base):
     )
     model_used: Mapped[str] = mapped_column(sa.String, nullable=False)
     prompt_version: Mapped[str] = mapped_column(sa.String, nullable=False)
-    input_tokens: Mapped[int | None] = mapped_column(sa.Integer)
-    output_tokens: Mapped[int | None] = mapped_column(sa.Integer)
-    cost_usd: Mapped[Decimal | None] = mapped_column(sa.Numeric(10, 6))
     created_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
     )
