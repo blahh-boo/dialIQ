@@ -47,6 +47,15 @@ class Settings(BaseSettings):
 
     ngrok_domain: str | None = None
 
+    max_call_attempts: int = Field(
+        default=2,
+        ge=1,
+        description=(
+            "Max dial attempts per lead before giving up. 1 = no retry; "
+            "2 = one retry of a no-answer/busy. Connected calls are never retried."
+        ),
+    )
+
     log_level: str = "INFO"
 
     @model_validator(mode="after")
