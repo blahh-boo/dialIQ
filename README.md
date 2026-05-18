@@ -89,6 +89,9 @@ fully recovers on the next `make seed`. Protections built into `make seed`:
 | `make api`    | `uv run uvicorn maple.web.app:app --reload` |
 | `make ui`     | `npm --prefix frontend run dev` |
 | `make reset`  | `uv run mystery-shop reset` (interactive confirm; wipes call data, keeps leads) |
+| `make call NUMBER=+1XXX` | One live call via polling — no ngrok needed. Writes to DB + saves fixture. |
+| `make campaign-live LIMIT=N` | Live campaign against real lead list. Webhook path — needs ngrok. |
+| `make mock [LIMIT=5]` | Mock campaign locally — no calls, no credits. |
 
 Every step is still individually runnable via the CLI — the Makefile is a thin,
 inspectable wrapper, not a black box.
@@ -223,7 +226,7 @@ uv run mypy maple
 uv run pytest
 ```
 
-177 tests across 10 files. No network dependency — the LLM and voice providers are mocked. A DB-insert smoke test (`test_db_schema.py`) exercises the schema + FK chain on in-memory SQLite so dialect bugs fail in CI; the rest is pure-unit.
+181 tests across 10 files. No network dependency — the LLM and voice providers are mocked. A DB-insert smoke test (`test_db_schema.py`) exercises the schema + FK chain on in-memory SQLite so dialect bugs fail in CI; the rest is pure-unit.
 
 ## Project layout
 

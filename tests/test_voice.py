@@ -56,17 +56,20 @@ def test_mock_report_has_required_fields() -> None:
 
 def test_mock_cycles_through_scenarios() -> None:
     provider = MockProvider()
-    results = [provider.place_call(**_CALL_KWARGS).report for _ in range(8)]  # type: ignore[arg-type]
-    # Should cycle; first 4 are unique, next 4 repeat
+    n = len(list(_FIXTURES.glob("*.json")))
+    results = [provider.place_call(**_CALL_KWARGS).report for _ in range(n * 2)]  # type: ignore[arg-type]
     ids = [r.call_id if r else None for r in results]
-    assert ids[:4] == ids[4:8]
+    assert ids[:n] == ids[n:]  # one full cycle repeats exactly
 
 
 def test_mock_cycle_covers_all_scenarios() -> None:
     provider = MockProvider()
-    reports = [provider.place_call(**_CALL_KWARGS).report for _ in range(4)]  # type: ignore[arg-type]
+    n = len(list(_FIXTURES.glob("*.json")))
+    reports = [provider.place_call(**_CALL_KWARGS).report for _ in range(n)]  # type: ignore[arg-type]
     ids = {r.call_id for r in reports if r is not None}
-    assert ids == {"good-pickup-001", "voicemail-001", "hold-transfer-001", "abandoned-001"}
+    # The 4 core canned fixtures must always be present; real captured transcripts
+    # may also appear and are valid additions to the fixture pool.
+    assert {"good-pickup-001", "voicemail-001", "hold-transfer-001", "abandoned-001"}.issubset(ids)
 
 
 # ── ReplayProvider ────────────────────────────────────────────────────────────

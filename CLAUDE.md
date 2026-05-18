@@ -8,7 +8,7 @@ Output for each call: structured data (not transcript dumps), including a non-ne
 
 ## Hard constraints
 
-- **Local-first.** Postgres on localhost. FastAPI on localhost. ngrok tunnel for Vapi webhooks. No Docker.
+- **Local-first.** SQLite by default (zero-install). Postgres is a one-line DSN swap, no code changes. FastAPI on localhost. ngrok only needed for webhook-based live campaigns (not for `make call`, which polls). No Docker.
 - **Anthropic API for all LLM work.** No OpenAI, no other providers in the pipeline.
 - **Extraction must be separate from scoring.** LLM produces observations; pure-Python scores them.
 - **`pickup: bool` is the load-bearing field.** Every other rubric dimension is downstream of it.
@@ -21,9 +21,8 @@ Output for each call: structured data (not transcript dumps), including a non-ne
 |---|---|---|
 | Language | Python | 3.11+ |
 | Web framework | FastAPI | latest |
-| Database | Postgres (local) | 15+ |
+| Database | SQLite (default) / Postgres (DSN swap) | — |
 | ORM | SQLAlchemy | 2.0.49 |
-| Migrations | Alembic | 1.18.4 |
 | Voice | Vapi (vapi-server-sdk) | 1.9.0 |
 | LLM | Anthropic SDK (`anthropic`) | 0.102.0 |
 | Validation | Pydantic | 2.x |
@@ -44,26 +43,28 @@ Output for each call: structured data (not transcript dumps), including a non-ne
 ```
 xlsx lead list
    ↓ (pandas ingest, normalize phones, infer timezone)
-Postgres: leads table
-   ↓ (scheduler picks eligible leads by tz + business hours)
+DB: leads table (SQLite default; Postgres = change DSN)
+   ↓ (scheduler: business hours, no-answer retry, google_reviews_count priority)
 Pre-call: Haiku infers cuisine_type + order_item from name/website
    ↓
 Vapi POST /call with assistantOverrides.variableValues
    ↓
 [Restaurant answers]
    ↓
-Vapi end-of-call-report webhook → FastAPI /vapi/webhook
+Two result paths:
+  A) make call / make campaign-live → polls calls.get() (no webhook needed)
+  B) make campaign-live with webhook → FastAPI /vapi/webhook → background task
    ↓
-Postgres: call_attempts + transcripts tables
+DB: call_attempts + transcripts tables
    ↓
-Background task: extraction pipeline
+Extraction pipeline:
    ├─ Haiku Pass 1: answered_by classifier (HUMAN/VOICEMAIL/IVR/...)
-   ├─ Sonnet Pass 2: 15-field strict-tool-use CallFacts extraction
+   ├─ Sonnet Pass 2: 10-field strict-tool-use CallFacts extraction
    └─ Deterministic Python scorer → score + tier
    ↓
 Haiku: generates SDR one-liner from facts + score
    ↓
-Postgres: extractions + scores tables
+DB: extractions + scores tables
    ↓
 ranked.csv export → the deliverable
 ```
@@ -85,7 +86,7 @@ Maple/
 ├── CLAUDE.md                   # this file
 ├── README.md                   # for the reviewer (incl. Operations section)
 ├── .env.example
-├── Makefile                    # setup / seed / api / ui / reset
+├── Makefile                    # setup / seed / api / ui / reset / call / campaign-live / mock
 ├── scripts/                    # setup.sh, seed.sh (guarded provisioning/seeding)
 ├── pyproject.toml
 ├── data.xlsx                   # the lead list
@@ -96,7 +97,7 @@ Maple/
 │   └── cost_log.json
 └── maple/                      # the package (no src/ wrapper, no Alembic)
     ├── __init__.py
-    ├── cli.py                  # typer: doctor, init-db, ingest, campaign, score, replay, reset, export-ranked
+    ├── cli.py                  # typer: doctor, init-db, ingest, campaign, call, score, replay, reset, export-ranked
     ├── config.py               # env vars, run mode
     ├── db.py                   # 5 SQLAlchemy models + session_scope() + init_db()
     ├── ingest.py               # phone E.164, zip, tz + state norm, xlsx → leads
@@ -121,7 +122,7 @@ Maple/
 
 - `leads` — restaurants from xlsx, with normalized phone, timezone, cuisine_type
 - `call_attempts` — one row per dial attempt; status, vapi_call_id, ended_reason
-- `transcripts` — raw_jsonb + plaintext + tsvector for FTS
+- `transcripts` — raw_jsonb + plaintext
 - `extractions` — fields_jsonb (the 15 CallFacts) + model_used + prompt_version
 - `scores` — pickup, numeric_score, tier, summary_one_liner
 
@@ -155,11 +156,11 @@ Tier thresholds:
 - **WARM:** `41 ≤ score ≤ 70`
 - **COLD:** `score ≥ 71`
 
-Deduction table (v1):
+Deduction table (v2):
 
 | Signal | Condition | Points |
 |---|---|---|
-| `rings_to_answer` | unknown | -3 |
+| `rings_to_answer` | unknown | 0 (absent evidence ≠ bad) |
 | | 3-4 rings | -5 |
 | | 5+ rings | -10 |
 | `put_on_hold` | True (base) | -5 |
@@ -176,7 +177,7 @@ Deduction table (v1):
 | `repeated_information_count` | 1 | -10 |
 | | 2 | -18 |
 | | 3+ | -25 |
-| `upsell_attempted` | False | -5 |
+| `upsell_attempted` | False | 0 (normal call, not a failure) |
 | `customer_effort_score` | 3 | -8 |
 | | 4 | -15 |
 | | 5 | -22 |
@@ -201,15 +202,22 @@ This is the canonical way to run the system. Prefer it; only drop to raw CLI for
 
 ```bash
 # one-time install + secrets
-brew install postgresql ngrok uv
+brew install ngrok uv          # no database server — SQLite is the default
 uv sync && npm --prefix frontend install
 cp .env.example .env                 # then put a real ANTHROPIC_API_KEY in .env
 uv run pre-commit install
 
-make setup     # check Postgres, create DB, migrate, doctor   (run once)
+make setup     # create schema + doctor   (run once)
 make seed      # deterministic demo data — re-run-safe         (run anytime)
 make api       # backend  (terminal 1) → http://localhost:8000
 make ui        # frontend (terminal 2) → http://localhost:5173
+
+# live call (single number, no ngrok needed)
+make call NUMBER=+1XXXXXXXXXX
+# live campaign (full lead list, needs ngrok + webhook)
+make campaign-live LIMIT=20
+# mock/offline
+make mock
 ```
 
 `make help` lists every target. **`make seed` is re-run-safe by construction**
@@ -223,22 +231,21 @@ the `reset` CLI command — the Makefile is a thin, inspectable wrapper.
 ### Raw CLI (what the targets wrap — for debugging)
 
 ```bash
-# one-time
-createdb mysteryshop
-uv run mystery-shop init-db                            # create schema from models
+# one-time (SQLite — no createdb needed)
+uv run mystery-shop init-db                            # creates maple.db from models
 
 # dev loop
-ngrok http --domain=<your-static-domain> 8000          # terminal 1 (live mode only)
-uv run uvicorn maple.web.app:app --reload              # terminal 2
+uv run uvicorn maple.web.app:app --reload              # terminal 1
 uv run mystery-shop doctor                             # health check
 uv run mystery-shop ingest data.xlsx                   # load leads
 uv run mystery-shop reset                              # wipe call data (keeps leads)
-uv run mystery-shop campaign --limit 20                # fire calls
+uv run mystery-shop campaign --limit 20                # mock calls
+RUN_MODE=live uv run mystery-shop call --to +1XXX...  # one real call (polling, no ngrok)
 uv run mystery-shop export-ranked                      # write samples/ranked.csv
 
 # quality gates
 uv run ruff check && uv run ruff format --check
-uv run mypy src
+uv run mypy maple
 uv run pytest
 ```
 
@@ -246,7 +253,8 @@ uv run pytest
 
 - `doctor` — verify env, DB, Anthropic auth, and (live mode) Vapi config
 - `ingest <xlsx>` — load + normalize lead list
-- `campaign --limit N` — fire N calls respecting business hours + interleave
+- `campaign --limit N` — fire N calls respecting business hours + interleave + no-answer retry
+- `call --to <e164>` — place ONE real call, poll until done, run pipeline; `--save-fixture` to capture transcript
 - `reset [--yes]` — wipe call data (call_attempts → … → scores), keep leads; refuses `--yes` on a non-local DB
 - `score --call-attempt-id N` — re-score an existing call (rubric iteration)
 - `replay <transcript.json>` — run the extraction pipeline against a saved transcript (no DB write)
