@@ -112,6 +112,7 @@ Live mode requires the four `VAPI_*` env vars (enforced by config validator).
 | `campaign --limit N`        | Fire N calls respecting business hours + interleave                                                  |
 | `score --call-attempt-id N` | Re-score an existing call against the current rubric (upsert on `(extraction_id, rubric_version)`) |
 | `replay <transcript.json>`  | Run the full LLM pipeline against a saved transcript; prints results,**no DB write**           |
+| `call --to <e164>`          | Place ONE real Vapi call (RUN_MODE=live), poll until it ends, run the full pipeline; `--save-fixture` to also capture the transcript |
 | `export-ranked`             | Write `samples/ranked.csv` ranked by SDR priority                                                  |
 
 ## Webhook
@@ -195,6 +196,10 @@ Sample-run budget ceiling: **$20**. 20 calls projected at ~$7. Prompt caching (`
 - **No menu scraping.** Cuisine/order item is Haiku-inferred from restaurant name + website before each call. The hardcoded fallback (`American` / `cheeseburger and fries`) only triggers if inference fails — it is never the primary path.
 - **No repository/DDD layer.** The scheduler's composable functions (who/when/what/build/persist) satisfy "separable rules that can evolve independently" without an abstraction layer that would be over-engineering for five local tables. The seam between pure business logic and ORM queries is explicit in the naming; adding a repository class would not improve testability or extensibility at this scale.
 - **No live campaign trigger from the UI.** A web button that dials real restaurants bypasses the safety guards (`reset` refuses `--yes` off-localhost; seed refuses live without `ALLOW_LIVE=1`). Campaign control stays in the CLI intentionally — that guard is worth more than the demo convenience.
+- **`call` find-or-creates the lead; production wouldn't.** `mystery-shop call --to <number>` auto-creates a placeholder lead (labelled `Sohail_Test`) if the number isn't already in the DB. This is deliberate scope:
+  - *Why now:* a testing affordance — dial your own phone to capture a real transcript without pre-seeding data.
+  - *Why polling, not webhook:* a one-off local capture shouldn't need ngrok + a public URL + dashboard `server.url`; `calls.get()` polling delivers the same end-of-call artifact. The webhook remains the correct production path for scale.
+  - *Long-term:* add the number as a real lead first (`ingest` or explicit insert) so every call has genuine provenance — no synthetic rows leaking into the funnel/metrics.
 - **No multi-tenancy, no auth on FastAPI.** Local-first, single operator.
 - **No concurrent call rate limiting.** Sequential dispatch is fine for 2,355 leads over a few hours.
 - **Recording consent is verbal in `firstMessage`.** Some two-party states need more — documented as a known limitation.

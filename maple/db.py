@@ -68,6 +68,10 @@ def get_engine() -> Engine:
         def _enable_sqlite_fk(dbapi_conn: Any, _: Any) -> None:
             cur = dbapi_conn.cursor()
             cur.execute("PRAGMA foreign_keys=ON")
+            # WAL mode allows concurrent readers + one writer without blocking.
+            # Without it, any second process (e.g. `make call` while `make api`
+            # is running) hits "database is locked" immediately.
+            cur.execute("PRAGMA journal_mode=WAL")
             cur.close()
 
     return engine

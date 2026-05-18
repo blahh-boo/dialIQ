@@ -344,5 +344,102 @@ def export_ranked(
     typer.echo(f"Wrote {count} rows → {output_path}")
 
 
+@app.command()
+def call(
+    to: str = typer.Option(..., "--to", help="Number to dial, E.164 (e.g. +15125551234)"),
+    save_fixture: str | None = typer.Option(
+        None,
+        "--save-fixture",
+        help="Also write the captured transcript JSON here "
+        "(e.g. samples/transcripts/real_call.json)",
+    ),
+    poll_timeout: int = typer.Option(
+        600, "--poll-timeout", help="Max seconds to wait for the call to end"
+    ),
+) -> None:
+    """Place ONE real Vapi call and run it through the full pipeline (RUN_MODE=live).
+
+    Find-or-creates a lead for the dialed number, labelled "Sohail_Test":
+
+      - Why find-or-create here: a test affordance so you can dial an
+        arbitrary number (your own phone) without pre-seeding a lead.
+      - Production / long-term: add the number as a real lead first (via
+        `ingest` or an explicit insert) so every call is against a curated,
+        intentional lead with real provenance — no synthetic rows in the funnel.
+
+    Polls `calls.get()` until the call ends (no webhook / public URL needed),
+    then writes call_attempt + transcript + extraction + score exactly like a
+    normal call. With --save-fixture it also dumps the transcript for `replay`.
+    """
+    import phonenumbers
+
+    from maple.config import RunMode, get_settings
+    from maple.db import Lead, session_scope
+    from maple.llm.client import ClaudeClient
+    from maple.scheduling import build_call_request, record_call_outcome, resolve_order_context
+    from maple.voice import VapiProvider
+
+    settings = get_settings()
+    if settings.run_mode is not RunMode.LIVE:
+        typer.echo(
+            f"RUN_MODE is {settings.run_mode}; `call` places a REAL call and "
+            "requires RUN_MODE=live.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    try:
+        parsed = phonenumbers.parse(to, "US")
+        e164 = phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
+    except phonenumbers.NumberParseException as exc:
+        typer.echo(f"Invalid phone number {to!r}: {exc}", err=True)
+        raise typer.Exit(1) from exc
+
+    client = ClaudeClient(settings.anthropic_api_key.get_secret_value())
+    provider = VapiProvider(
+        api_key=settings.vapi_api_key.get_secret_value(),  # type: ignore[union-attr]
+        phone_number_id=settings.vapi_phone_number_id or "",
+    )
+    assistant_id = settings.vapi_assistant_id or ""
+
+    with session_scope() as session:
+        lead = session.query(Lead).filter_by(phone_e164=e164).first()
+        if lead is None:
+            lead = Lead(restaurant_name="Sohail_Test", phone_e164=e164)
+            session.add(lead)
+            session.flush()
+            typer.echo(f"Created test lead #{lead.id} (Sohail_Test) for {e164}")
+        else:
+            typer.echo(f"Using existing lead #{lead.id} ({lead.restaurant_name})")
+
+        cuisine_type, order_item = resolve_order_context(lead, client=client)
+        session.flush()
+        request = build_call_request(
+            lead,
+            cuisine_type=cuisine_type,
+            order_item=order_item,
+            assistant_id=assistant_id,
+        )
+
+        typer.echo(f"Dialing {e164} — waiting for the call to end (Ctrl-C to abort)…")
+        placed = provider.place_call_and_wait(
+            to=request.to,
+            assistant_id=request.assistant_id,
+            variables=request.variables,
+            poll_timeout=poll_timeout,
+        )
+        typer.echo(f"Call ended (vapi_call_id={placed.vapi_call_id}). Running pipeline…")
+
+        if save_fixture and placed.report is not None:
+            fixture_path = Path(save_fixture)
+            fixture_path.parent.mkdir(parents=True, exist_ok=True)
+            fixture_path.write_text(placed.report.model_dump_json(indent=2))
+            typer.echo(f"Saved transcript fixture → {fixture_path}")
+
+        record_call_outcome(request, placed, session=session, client=client)
+
+    typer.echo("Done — call captured, extracted, and scored.")
+
+
 if __name__ == "__main__":
     app()

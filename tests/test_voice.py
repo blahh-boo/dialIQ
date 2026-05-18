@@ -3,10 +3,19 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
-from maple.voice import EndOfCallReport, MockProvider, PlacedCall, ReplayProvider, VoiceProvider
+from maple.voice import (
+    EndOfCallReport,
+    MockProvider,
+    PlacedCall,
+    ReplayProvider,
+    VoiceProvider,
+    _call_to_report,
+)
 
 _FIXTURES = Path(__file__).parent.parent / "samples" / "transcripts"
 
@@ -135,3 +144,71 @@ def test_hold_transfer_fixture_has_hold_signal() -> None:
     report = EndOfCallReport.model_validate(data)
     assert any("hold" in m.message.lower() for m in report.messages)
     assert any("transfer" in m.message.lower() for m in report.messages)
+
+
+# ── _call_to_report: Vapi calls.get() → EndOfCallReport mapping ───────────────
+
+
+def _fake_msg(**kw: object) -> SimpleNamespace:
+    base: dict[str, object] = {
+        "role": "user",
+        "message": "hi",
+        "seconds_from_start": 0.0,
+        "duration": None,
+    }
+    base.update(kw)
+    return SimpleNamespace(**base)
+
+
+def _fake_call(**kw: object) -> SimpleNamespace:
+    artifact = SimpleNamespace(
+        transcript=kw.pop("transcript", "User: hi\nAI: hello"),
+        messages=kw.pop("messages", [_fake_msg()]),
+    )
+    base: dict[str, object] = {
+        "id": "call-abc",
+        "ended_reason": "customer-ended-call",
+        "started_at": datetime(2024, 6, 15, 12, 0, 0, tzinfo=UTC),
+        "ended_at": datetime(2024, 6, 15, 12, 1, 30, tzinfo=UTC),
+        "artifact": artifact,
+    }
+    base.update(kw)
+    return SimpleNamespace(**base)
+
+
+def test_call_to_report_maps_core_fields() -> None:
+    report = _call_to_report(_fake_call())
+    assert report.call_id == "call-abc"
+    assert report.ended_reason == "customer-ended-call"
+    assert report.transcript_text == "User: hi\nAI: hello"
+    assert report.duration_seconds == 90  # 12:01:30 minus 12:00:00
+
+
+def test_call_to_report_uses_seconds_from_start_for_time() -> None:
+    msgs = [_fake_msg(role="bot", message="Thanks for calling", seconds_from_start=4.2, duration=1.1)]
+    report = _call_to_report(_fake_call(messages=msgs))
+    assert len(report.messages) == 1
+    assert report.messages[0].role == "bot"
+    assert report.messages[0].time == 4.2
+    assert report.messages[0].duration == 1.1
+
+
+def test_call_to_report_skips_textless_messages() -> None:
+    msgs = [
+        _fake_msg(message="real turn"),
+        _fake_msg(message=None),  # tool-call style — no transcript text
+        SimpleNamespace(role="tool_calls"),  # missing message attr entirely
+    ]
+    report = _call_to_report(_fake_call(messages=msgs))
+    assert [m.message for m in report.messages] == ["real turn"]
+
+
+def test_call_to_report_handles_sparse_call() -> None:
+    # Early-terminated call: no artifact, no timestamps.
+    sparse = SimpleNamespace(
+        id="call-x", ended_reason="no-answer", artifact=None, started_at=None, ended_at=None
+    )
+    report = _call_to_report(sparse)
+    assert report.transcript_text == ""
+    assert report.messages == ()
+    assert report.duration_seconds == 0
