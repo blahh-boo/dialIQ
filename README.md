@@ -9,7 +9,7 @@ The output for each restaurant is structured data — not a transcript dump — 
 | Service | What it does |
 |---|---|
 | **Lead ingest** | Reads an xlsx export, normalises phones to E.164, infers timezone from zip/state, deduplicates, and loads into `leads`. |
-| **Campaign orchestrator** | Selects eligible leads (business hours, never-called or retryable no-answer), infers what to order per restaurant via Haiku, and dispatches calls through the voice provider. |
+| **Campaign orchestrator** | Selects eligible leads (business hours, never-called or retryable no-answer), infers what to order per restaurant via Sonnet, and dispatches calls through the voice provider. |
 | **Extraction pipeline** | After each call: classifies who answered (Haiku), extracts 10 structured facts from the transcript (Sonnet strict tool use), and scores them deterministically (pure Python). |
 | **SDR export** | Writes `ranked.csv` sorted HOT → WARM → COLD, worst score first — the one file an SDR needs. |
 | **Cockpit API** | FastAPI endpoints the frontend reads; also receives and processes Vapi end-of-call webhooks. |

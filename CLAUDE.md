@@ -45,7 +45,7 @@ xlsx lead list
    ↓ (pandas ingest, normalize phones, infer timezone)
 DB: leads table (SQLite default; Postgres = change DSN)
    ↓ (scheduler: business hours, no-answer retry, google_reviews_count priority)
-Pre-call: Haiku infers cuisine_type + order_item from name/website
+Pre-call: Sonnet infers cuisine_type + order_item from name/website
    ↓
 Vapi POST /call with assistantOverrides.variableValues
    ↓
