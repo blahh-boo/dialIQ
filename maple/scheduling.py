@@ -252,6 +252,12 @@ def _persist_extraction(
     client: ClaudeClient,
 ) -> None:
     """Classify → extract → score → write extraction + score rows."""
+    if not report.transcript_text.strip():
+        logger.warning(
+            "call_attempt %d has empty transcript (no-answer or silent call) — skipping extraction",
+            call_attempt_id,
+        )
+        return
     answered_by = classify_answered_by(report.transcript_text, client=client)
     facts = extract_call_facts(report, answered_by=answered_by, client=client)
     result = score_call(facts)

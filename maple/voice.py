@@ -145,6 +145,8 @@ def _call_to_report(call: Any) -> EndOfCallReport:
         role = getattr(m, "role", None)
         if not text or not role:
             continue  # tool-call / non-conversational turns carry no transcript text
+        if role == "system":
+            continue  # the agent's system prompt is config, not conversation
         messages.append(
             TranscriptMessage(
                 role=str(role),
