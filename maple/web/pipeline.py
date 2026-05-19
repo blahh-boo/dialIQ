@@ -47,6 +47,13 @@ def run_extraction_pipeline(
     """
     transcript_text = report.transcript or ""
 
+    if not transcript_text.strip():
+        logger.warning(
+            "call_attempt %d has empty transcript (no-answer or silent call) — skipping extraction",
+            call_attempt_id,
+        )
+        return
+
     # Pass 1: cheap Haiku classifier
     answered_by: AnsweredBy = classify_answered_by(transcript_text, client=client)
     logger.info("call_attempt=%d answered_by=%s", call_attempt_id, answered_by)

@@ -163,13 +163,15 @@ def _map_role(vapi_role: Any) -> str | None:
     Our Vapi assistant ("Takeout Order Caller") IS the Maple mystery shopper,
     so role="assistant" is the shopper placing the order and role="user" is the
     restaurant answering. The canned fixtures follow the same convention.
+
+    `system` (the agent's system prompt) and any other role return None so they
+    are dropped — the system prompt is configuration, not conversation, and must
+    never surface in the SDR transcript view.
     """
     if vapi_role == "assistant":
         return "shopper"
     if vapi_role == "user":
         return "restaurant"
-    if vapi_role == "system":
-        return "system"
     return None
 
 

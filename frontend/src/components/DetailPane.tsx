@@ -275,7 +275,7 @@ function TranscriptView({ transcript }: { transcript: TranscriptTurn[] }) {
         border: '1px solid var(--border)',
         borderRadius: 10,
         padding: '10px 16px',
-        maxHeight: 320,
+        maxHeight: 'min(600px, 55vh)',
         overflowY: 'auto',
       }}
     >
