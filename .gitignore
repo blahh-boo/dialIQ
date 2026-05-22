@@ -44,10 +44,13 @@ Thumbs.db
 # Logs
 *.log
 
-# Local database (SQLite default — disposable, rebuilt by `make seed`)
-maple.db
+# Local database (SQLite default — disposable, rebuilt by `make seed`).
+# The glob also catches the WAL sidecars maple.db-wal / maple.db-shm.
+maple.db*
 *.sqlite
 *.sqlite3
+*.db-wal
+*.db-shm
 
 # Local Postgres dumps
 *.dump
