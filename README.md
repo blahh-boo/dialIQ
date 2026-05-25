@@ -1,3 +1,5 @@
+<img width="1439" height="816" alt="PNG image 2" src="https://github.com/user-attachments/assets/c9ed3f64-f1a1-48dc-b34c-5a9a77fc155c" />
+<img width="1420" height="860" alt="PNG image" src="https://github.com/user-attachments/assets/c0cd1b38-dadb-4679-acf8-9b85e807a3f1" />
 # Mystery Shop
 
 Automated phone-based mystery shopping for restaurant leads. Places a takeout-order call via Vapi, extracts ten structured facts per call with Claude, scores each call deterministically, and outputs an SDR-ranked CSV.
